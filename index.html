@@ -3,80 +3,50 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Nora — Voice Assistant</title>
+<title>Nora</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
   html,body{height:100%}
   body{
-    background:#0e1116; color:#e8e9ed;
+    background:#0e1116;
     display:flex;align-items:center;justify-content:center;
     -webkit-user-select:none;user-select:none;
     font-family:-apple-system,BlinkMacSystemFont,"Inter",system-ui,sans-serif;
-    touch-action:manipulation; padding:24px;
+    touch-action:manipulation;
   }
-  .wrap{display:grid;gap:18px; width:min(520px,100%)}
-  .title{font-weight:800;letter-spacing:.2px}
   .voice-button{
     width:180px;height:180px;border:none;border-radius:28px;background:#131722;
-    box-shadow:0 4px 16px rgba(0,0,0,.25), inset 0 -3px 0 rgba(255,255,255,.04);
-    cursor:pointer;position:relative;margin:0 auto;display:grid;place-items:center;
+    box-shadow:0 6px 22px rgba(0,0,0,.35), inset 0 -3px 0 rgba(255,255,255,.04);
+    cursor:pointer;position:relative;display:grid;place-items:center;
     transition:transform .06s ease, box-shadow .06s ease, background .15s ease, color .15s ease;
-    color:#e8e9ed;-webkit-tap-highlight-color:transparent;
-    font-size:14px;font-weight:600;border:1px solid #1d2433;
+    color:#e8e9ed;-webkit-tap-highlight-color:transparent;border:1px solid #1d2433;
   }
   .voice-button:active,.voice-button.pressed{transform:scale(.98);box-shadow:inset 0 4px 12px rgba(0,0,0,.35),0 2px 4px rgba(0,0,0,.2)}
   .voice-button.idle{background:#131722;color:#e8e9ed}
-  .voice-button.listening{background:#0b5cff;color:#fff;box-shadow:0 0 0 4px rgba(11,92,255,.18), 0 8px 24px rgba(0,0,0,.35)}
+  .voice-button.listening{background:#0b5cff;color:#fff;box-shadow:0 0 0 4px rgba(11,92,255,.18), 0 10px 28px rgba(0,0,0,.45)}
   .voice-button.thinking{background:#ffd60a;color:#111}
   .voice-button.speaking{background:#18c964;color:#0b0c10}
   .voice-button.error{background:#ff3b30;color:#fff}
-
-  .mic-icon{width:40px;height:40px;fill:currentColor}
-  .status{font-size:12px;opacity:.8;text-align:center;min-height:18px}
-  .log{
-    background:#0b0f19;border:1px solid #1d2433;color:#cfd3dc;border-radius:14px;
-    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    padding:12px; font-size:12px; white-space:pre-wrap; max-height:38vh; overflow:auto;
-  }
-  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  .pill{font-size:12px;opacity:.85}
-  .controls{display:flex;gap:10px;justify-content:center}
-  button.small{padding:8px 12px;border-radius:10px;border:1px solid #1d2433;background:#131722;color:#e8e9ed;cursor:pointer}
+  .mic-icon{width:44px;height:44px;fill:currentColor}
 </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="title">Nora — Voice Assistant</div>
+  <!-- The ONLY visible UI -->
+  <button id="voiceBtn" class="voice-button idle" aria-label="Press to talk" title="">
+    <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/>
+    </svg>
+  </button>
 
-    <button id="voiceBtn" class="voice-button idle" aria-label="Nora — press to talk">
-      <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/>
-      </svg>
-    </button>
-
-    <div class="status" id="status">Idle</div>
-
-    <div class="controls">
-      <button id="clear" class="small">Clear log</button>
-      <button id="stop"  class="small">Stop</button>
-    </div>
-
-    <div id="log" class="log" aria-live="polite"></div>
-
-    <!-- business / memory scope -->
-    <input id="bizId" type="hidden" value="nora"/>
-  </div>
+  <!-- scope key (kept hidden) -->
+  <input id="bizId" type="hidden" value="nora"/>
 
 <script>
 (() => {
   const voiceBtn = document.getElementById('voiceBtn');
-  const statusEl = document.getElementById('status');
-  const logEl    = document.getElementById('log');
-  const stopBtn  = document.getElementById('stop');
-  const clearBtn = document.getElementById('clear');
-  const BIZ_ID   = (document.getElementById('bizId').value || 'nora');
+  const BIZ_ID = (document.getElementById('bizId').value || 'nora');
 
-  // persistent local settings
+  // persistent lightweight memory (unchanged behavior, no UI)
   const LOCAL_KEY = `nora_voice_memory_${BIZ_ID}`;
   function loadLocal(){
     try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || '{"items":[],"conversations":[],"voice":"alloy","pace":0.95,"boot":false}'); }
@@ -100,17 +70,16 @@
   function setBtnState(cls){
     voiceBtn.className = `voice-button ${cls}`;
     const label = {
-      idle:"Nora — press to talk",
-      listening:"Listening — press to stop",
+      idle:"Press to talk",
+      listening:"Listening — tap to stop",
       thinking:"Processing…",
-      speaking:"Speaking — press to interrupt",
-      error:"Error — press to retry"
-    }[cls] || "Nora — press to talk";
+      speaking:"Speaking — tap to interrupt",
+      error:"Error — tap to retry"
+    }[cls] || "Press to talk";
     voiceBtn.setAttribute('aria-label', label);
-    statusEl.textContent = label;
   }
-  function log(msg){ const t = `[${new Date().toLocaleTimeString()}] ${msg}`; logEl.textContent += (logEl.textContent?'\n':'') + t; logEl.scrollTop = logEl.scrollHeight; }
 
+  // ---- Boot / iOS priming ----
   async function bootOnce(){
     if (hasBoot) return true;
     try{
@@ -125,17 +94,16 @@
       const SILENCE = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
       speaker.volume = 0.01; speaker.src = SILENCE; speaker.play().catch(()=>{}); speaker.pause(); speaker.currentTime = 0; speaker.volume = 1.0;
 
-      // probe mic permission
-      const test = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true } });
+      // probe mic permissions
+      const test = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:true } });
       test.getTracks().forEach(t=>t.stop());
 
       hasBoot = true; memoryShadow.boot = true; saveLocal(memoryShadow);
-      log("Boot OK");
       return true;
-    } catch(e){
-      log("Boot failed: " + e.message);
+    }catch(e){
+      console.log("Boot failed:", e);
       setBtnState('error');
-      hasBoot = false;
+      hasBoot=false;
       return false;
     }
   }
@@ -181,24 +149,25 @@
     if(isListening||isProcessing) return;
     try{
       isListening = true; setBtnState('listening');
-
       await ensureAudioContext();
       micStream = await getMicStream();
+
       const mime = getPreferredMime();
       const opts = {}; if(mime) opts.mimeType = mime;
       micRecorder = new MediaRecorder(micStream, opts);
+
       chunks = []; startedAt = performance.now(); lastNonSilenceAt = startedAt;
 
       micRecorder.ondataavailable = (e)=>{ if(e.data && e.data.size>0) chunks.push(e.data); };
       micRecorder.onstop = async ()=>{ isListening=false; await processRecording(); };
-      micRecorder.onerror = (e)=>{ log('Recorder error: ' + (e.error?.message||e.message||e)); isListening=false; cleanupMicrophone(); setBtnState('error'); };
+      micRecorder.onerror = (e)=>{ console.log('Recorder error:', e); isListening=false; cleanupMicrophone(); setBtnState('error'); };
 
       micRecorder.start(100);
       setupAudioProcessing();
 
       maxRecordTimer = setTimeout(()=>{ try{ if(micRecorder?.state==='recording') micRecorder.stop(); }catch{} }, 12000);
     }catch(e){
-      log("Start listen failed: " + e.message);
+      console.log("Start listen failed:", e);
       setBtnState('error'); isListening=false; cleanupMicrophone();
     }
   }
@@ -218,10 +187,10 @@
         if(avg>THRESH){ hasSpeech=true; lastNonSilenceAt=now; }
         const elapsed = now-startedAt, since = now-lastNonSilenceAt;
         if(hasSpeech && elapsed>MIN_MS && since>LINGER_MS){
-          try{ if(micRecorder?.state==='recording') micRecorder.stop(); }catch(e){}
+          try{ if(micRecorder?.state==='recording') micRecorder.stop(); }catch{}
         }
       };
-    }catch(e){ log("Audio processing setup error: " + e.message); }
+    }catch(e){ console.log("Audio processing setup error:", e); }
   }
 
   async function blobToBase64(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onloadend=()=>{ const s=String(r.result||""); res(s.split(",")[1]||"");}; r.onerror=()=>rej(r.error||new Error("readAsDataURL failed")); r.readAsDataURL(blob); }); }
@@ -236,27 +205,26 @@
       const duration=await getAudioDuration(blob);
       const b64 = await blobToBase64(blob);
       inflightController?.abort(); inflightController = new AbortController();
+
       const payload = {
         businessId: BIZ_ID,
         sessionId,
         memoryShadow,
         audio:{ data:b64, mime: blob.type||'audio/webm', originalSize: blob.size, processedSize: blob.size, duration }
       };
+
       const resp = await fetch('/.netlify/functions/voice',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload), signal:inflightController.signal });
-      if(!resp.ok){ setBtnState('error'); log("Server error: " + resp.status + " " + resp.statusText); isProcessing=false; return; }
+      if(!resp.ok){ setBtnState('error'); console.log("Server error:", resp.status, resp.statusText); isProcessing=false; return; }
       const data = await resp.json();
       if(data.sessionId) sessionId = data.sessionId;
       if(data.memoryShadow){ memoryShadow = data.memoryShadow; saveLocal(memoryShadow); }
 
       if(data.control?.stopListening){ setBtnState('idle'); isProcessing=false; return; }
-      if(!data.audio){ isProcessing=false; if(isSession) setTimeout(()=>startListening(),200); else setBtnState('idle'); log("No audio in response; text: " + (data.response||"(none)")); return; }
-
-      log("You: " + (data.transcript||"(no transcript)"));
-      log("Nora: " + (data.response||"(no text)"));
+      if(!data.audio){ isProcessing=false; if(isSession) setTimeout(()=>startListening(),200); else setBtnState('idle'); return; }
 
       await playResponse(data.audio);
     }catch(e){
-      log("Processing error: " + e.message);
+      console.log("Processing error:", e);
       setBtnState('error');
       if(isSession) setTimeout(()=>{ isProcessing=false; startListening(); }, 500); else isProcessing=false;
     }finally{ cleanupMicrophone(); }
@@ -297,31 +265,25 @@
     isSession=false; isListening=false; isProcessing=false;
     inflightController?.abort(); stopSpeaker();
     try{ if(micRecorder?.state==='recording') micRecorder.stop(); }catch{}
-    cleanupMicrophone(); setBtnState('idle'); log("Session stopped.");
+    cleanupMicrophone(); setBtnState('idle');
   }
 
   async function handleToggle(e){
     e.preventDefault(); if(uiLock) return; uiLock=true; voiceBtn.classList.add('pressed'); setTimeout(()=>voiceBtn.classList.remove('pressed'),120);
     try{
       if(!memoryShadow.boot || !hasBoot){ const ok = await bootOnce(); if(!ok){ uiLock=false; return; } await new Promise(r=>setTimeout(r,75)); }
-      if(!isSession){ isSession=true; sessionId='nora_'+Date.now(); log("Session: "+sessionId); await startListening(); }
+      if(!isSession){ isSession=true; sessionId='nora_'+Date.now(); await startListening(); }
       else { stopSession(); }
     } catch(err){
-      log("Toggle error: " + err.message); setBtnState('error'); setTimeout(()=>{ if(!isSession) setBtnState('idle'); }, 900);
-    } finally {
-      setTimeout(()=>uiLock=false, 250);
-    }
+      console.log("Toggle error:", err); setBtnState('error'); setTimeout(()=>{ if(!isSession) setBtnState('idle'); }, 900);
+    } finally { setTimeout(()=>uiLock=false, 250); }
   }
 
   voiceBtn.addEventListener('click', handleToggle, { passive:false });
   voiceBtn.addEventListener('click', ()=>{ if(isSpeaking && isSession){ stopSpeaker(); } }, { passive:true });
   voiceBtn.addEventListener('keydown', (e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); handleToggle(e);} });
 
-  stopBtn.addEventListener('click', stopSession);
-  clearBtn.addEventListener('click', ()=>{ logEl.textContent=''; });
-
   setBtnState('idle');
-  log("Nora UI ready.");
 })();
 </script>
 </body>
