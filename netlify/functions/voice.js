@@ -1,9 +1,4 @@
-// Netlify Function: Senior-Optimized Voice Assistant (Fixed ElevenLabs Integration)
-// Key fixes:
-// - Better error handling for ElevenLabs API
-// - Improved API endpoint and request structure
-// - Added debugging and fallback logic
-// - Fixed audio format handling
+// Netlify Function: Senior-Optimized Voice Assistant (ElevenLabs-first, hard-fail when requested)
 
 const OPENAI_ROOT = "https://api.openai.com/v1";
 
@@ -18,7 +13,7 @@ const DEFAULT_SPEED = 0.85;
 const SENIOR_VOLUME_BOOST = 1.2;
 
 const ELEVEN_API_KEY = process.env.ELEVENLABS_API_KEY || "";
-const ELEVEN_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "";
+const ELEVEN_VOICE_ID_ENV = process.env.ELEVENLABS_VOICE_ID || "";
 
 const MAX_TURNS = 30;
 const MAX_MEMORY_ITEMS = 2000;
@@ -27,7 +22,7 @@ const memoryStore = new Map();
 const brainVectors = new Map();
 const deviceBrain = new Map();
 
-// --- util core
+// --- utils
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const safeJson = (s) => { try { return JSON.parse(s); } catch { return null; } };
 const ext = (m) =>
@@ -41,93 +36,53 @@ const reply = (code, data, headers) => ({ statusCode: code, headers, body: JSON.
 function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
 
 function tokenize(s){
-  return String(s || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter(Boolean);
+  return String(s || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
 }
-
-// Restores the **original substring** (with casing) from `full` given a lowercase slice
 function matchOriginal(full, lowerSlice){
-  const pattern = lowerSlice
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")   // escape regex
-    .replace(/\s+/g, "\\s+");                 // be lenient on whitespace
+  const pattern = lowerSlice.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
   const re = new RegExp(pattern, "i");
   const m = String(full || "").match(re);
   return m ? m[0].trim() : lowerSlice;
 }
-
-function titleCase(s){
-  return String(s || "").replace(/\b\w/g, c => c.toUpperCase());
-}
-
-function pruneMap(map, max){
-  if (map.size <= max) return;
-  const keys = [...map.keys()];
-  for (let i = 0; i < map.size - max; i++) map.delete(keys[i]);
-}
+function titleCase(s){ return String(s || "").replace(/\b\w/g, c => c.toUpperCase()); }
+function pruneMap(map, max){ if (map.size <= max) return; const keys = [...map.keys()]; for (let i = 0; i < map.size - max; i++) map.delete(keys[i]); }
 
 function ensureBrain(businessId){
   if (!deviceBrain.has(businessId)) {
-    deviceBrain.set(businessId, {
-      voice: DEFAULT_VOICE,
-      speed: DEFAULT_SPEED,
-      items: [],
-      conversations: [],
-    });
+    deviceBrain.set(businessId, { voice: DEFAULT_VOICE, speed: DEFAULT_SPEED, items: [], conversations: [] });
   }
   const b = deviceBrain.get(businessId);
   if (!b.conversations) b.conversations = [];
   return b;
 }
-
-function makeItem(type, text, extra = {}){
-  const base = {
-    id: uid(),
-    type,
-    text: String(text || "").trim(),
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    tags: [],
-    confidence: 1.0
-  };
-  Object.assign(base, extra);
-  return base;
-}
-
+function makeItem(type, text, extra = {}){ return Object.assign({ id: uid(), type, text: String(text || "").trim(), createdAt: Date.now(), updatedAt: Date.now(), tags: [], confidence: 1.0 }, extra); }
 function indexItem(it){ brainVectors.set(it.id, new Set(tokenize(it.text))); }
-
 function isDuplicate(items, newText){
-  const newTokens = new Set(tokenize(newText));
+  const a = new Set(tokenize(newText));
   return items.some(item => {
-    const itemTokens = new Set(tokenize(item.text));
-    let overlap = 0;
-    for (const t of newTokens) if (itemTokens.has(t)) overlap++;
-    const similarity = overlap / Math.min(newTokens.size, itemTokens.size || 1);
-    return similarity > 0.75;
+    const b = new Set(tokenize(item.text));
+    let overlap = 0; for (const t of a) if (b.has(t)) overlap++;
+    const sim = overlap / Math.min(a.size, b.size || 1);
+    return sim > 0.75;
   });
 }
-
 function scoreItems(items, query){
   const qset = new Set(tokenize(query));
   const now = Date.now();
   return items.map(it => {
     const w = brainVectors.get(it.id) || new Set(tokenize(it.text));
     let overlap = 0; for (const t of qset) if (w.has(t)) overlap++;
-    const recency = 1 / Math.max(1, (now - (it.updatedAt || it.createdAt)) / (1000 * 60 * 60 * 24));
+    const recency = 1 / Math.max(1, (now - (it.updatedAt || it.createdAt)) / (86400000));
     const confidence = it.confidence || 0.5;
     let typeBoost = 0;
     if (it.type === "family") typeBoost = 0.9;
     else if (it.type === "medical-contact") typeBoost = 0.8;
     else if (it.type === "medication") typeBoost = 0.7;
-    else if (it.type === "location") typeBoost = 0.6;
     else if (it.tags?.includes("important")) typeBoost = 0.5;
     return { ...it, _score: overlap + recency * 0.2 + confidence * 0.4 + typeBoost };
   }).sort((a,b) => b._score - a._score);
 }
 
-// --- Netlify handler
 exports.handler = async (event) => {
   const headers = {
     "Content-Type": "application/json",
@@ -147,7 +102,7 @@ exports.handler = async (event) => {
     if (!body) return reply(400, { error: "Invalid JSON body" }, headers);
     if (body.test) return reply(200, { message: "API endpoint working", ts: new Date().toISOString() }, headers);
 
-    const { businessId, sessionId, audio, memoryShadow } = body;
+    const { businessId, sessionId, audio, memoryShadow, tts } = body;
     if (!businessId || !audio?.data || !audio?.mime)
       return reply(400, { error: "Missing required information" }, headers);
 
@@ -161,23 +116,15 @@ exports.handler = async (event) => {
       transcript = await withRetry(() => transcribeForSeniors(audio.data, audio.mime), 2);
     } catch (e) {
       const msg = "I'm having trouble hearing you. Could you please speak a bit louder and try again?";
-      const speech = await safeTTS(msg, businessId).catch(() => null);
-      return reply(200, {
-        sessionId: sid, transcript: "", response: msg,
-        audio: speech?.dataUrl, ttsEngine: speech?.engine,
-        memoryShadow: brainSnapshot(brain), error: "stt_failed"
-      }, headers);
+      const speech = await safeTTS(msg, businessId, tts).catch(() => null);
+      return reply(200, { sessionId: sid, transcript: "", response: msg, audio: speech?.dataUrl, ttsEngine: speech?.engine, memoryShadow: brainSnapshot(brain), error: "stt_failed" }, headers);
     }
 
     const words = (transcript || "").trim().split(/\s+/).filter(Boolean);
     if (!transcript?.trim() || words.length < 1) {
       const ask = "I heard something, but I'm not sure what you said. Could you repeat that for me?";
-      const speech = await safeTTS(ask, businessId).catch(() => null);
-      return reply(200, {
-        sessionId: sid, transcript, response: ask,
-        audio: speech?.dataUrl, ttsEngine: speech?.engine,
-        memoryShadow: brainSnapshot(brain)
-      }, headers);
+      const speech = await safeTTS(ask, businessId, tts).catch(() => null);
+      return reply(200, { sessionId: sid, transcript, response: ask, audio: speech?.dataUrl, ttsEngine: speech?.engine, memoryShadow: brainSnapshot(brain) }, headers);
     }
 
     logConversationTurn(businessId, sid, transcript, "user");
@@ -186,26 +133,21 @@ exports.handler = async (event) => {
     const fast = await routeIntentForSeniors(businessId, sid, transcript);
     if (fast) {
       logConversationTurn(businessId, sid, fast.say, "assistant");
-      const speech = await safeTTS(fast.say, businessId).catch(() => null);
-      return reply(200, {
-        sessionId: sid, transcript, response: fast.say,
-        audio: speech?.dataUrl, ttsEngine: speech?.engine,
-        control: fast.control || undefined,
-        memoryShadow: brainSnapshot(ensureBrain(businessId))
-      }, headers);
+      const speech = await safeTTS(fast.say, businessId, tts).catch((err) => ({ dataUrl:null, engine:null, error:String(err?.message||err) }));
+      // If Eleven was forced and failed, surface the error
+      const resp = { sessionId: sid, transcript, response: fast.say, audio: speech?.dataUrl, ttsEngine: speech?.engine, control: fast.control || undefined, memoryShadow: brainSnapshot(ensureBrain(businessId)) };
+      if (!speech?.dataUrl && tts?.engine === "eleven") resp.error = speech?.error || "eleven_failed";
+      return reply(200, resp, headers);
     }
 
     // main chat
-    const answer = await chatWithSeniorMemory(sid, businessId, transcript)
-      .catch(() => "I'm having a small technical issue. Could you try that again?");
+    const answer = await chatWithSeniorMemory(sid, businessId, transcript).catch(() => "I'm having a small technical issue. Could you try that again?");
     logConversationTurn(businessId, sid, answer, "assistant");
-    const speech = await safeTTS(answer, businessId).catch(() => null);
+    const speech = await safeTTS(answer, businessId, tts).catch((err) => ({ dataUrl:null, engine:null, error:String(err?.message||err) }));
 
-    return reply(200, {
-      sessionId: sid, transcript, response: answer,
-      audio: speech?.dataUrl, ttsEngine: speech?.engine,
-      memoryShadow: brainSnapshot(ensureBrain(businessId))
-    }, headers);
+    const responsePayload = { sessionId: sid, transcript, response: answer, audio: speech?.dataUrl, ttsEngine: speech?.engine, memoryShadow: brainSnapshot(ensureBrain(businessId)) };
+    if (!speech?.dataUrl && tts?.engine === "eleven") responsePayload.error = speech?.error || "eleven_failed";
+    return reply(200, responsePayload, headers);
 
   } catch (err) {
     console.error("Handler error:", err);
@@ -252,81 +194,6 @@ async function routeIntentForSeniors(businessId, sessionId, raw){
   if (/\b(slow down|too fast|speak slower)\b/.test(lower)) {
     ensureBrain(businessId).speed = Math.max(0.7, (brain.speed || DEFAULT_SPEED) - 0.1);
     return { say: "I'll slow down my speech. How is this pace?" };
-  }
-
-  if (/\b(what can you remember|memory|do you remember)\b/.test(lower) && /\b(how|what|tell me)\b/.test(lower)) {
-    const itemCount = brain.items?.length || 0;
-    const convCount = brain.conversations?.length || 0;
-    return { say: `I remember ${itemCount} important things you've told me, and I keep track of our conversations.` };
-  }
-
-  const doctorInfo = lower.match(/^(?:remember|save)\s+(?:my\s+)?doctor'?s?\s+name\s+is\s+(.+?)\.?$/i);
-  if (doctorInfo) {
-    const name = titleCase(matchOriginal(raw, doctorInfo[1]));
-    const item = makeItem("medical-contact", `Doctor: ${name}`, { type_detail: "doctor", name, tags: ["medical","important"], confidence: 1.0 });
-    const b = ensureBrain(businessId); b.items.push(item); indexItem(item); pruneMemoryItems(b);
-    return { say: `I've saved that your doctor is ${name}.` };
-  }
-
-  const medication = lower.match(/^(?:remember|save)\s+(?:my\s+)?(?:medicine|medication|pill)\s+(.+?)\.?$/i);
-  if (medication) {
-    const med = matchOriginal(raw, medication[1]);
-    const item = makeItem("medication", `Medication: ${med}`, { medication: med, tags: ["medical","important"], confidence: 1.0 });
-    const b = ensureBrain(businessId); b.items.push(item); indexItem(item); pruneMemoryItems(b);
-    return { say: `I've noted your medication ${med}.` };
-  }
-
-  const family = lower.match(/^(?:remember|save)\s+(?:my\s+)?(son|daughter|grandson|granddaughter|child|grandchild)'?s?\s+name\s+is\s+(.+?)\.?$/i);
-  if (family) {
-    const relation = family[1];
-    const name = titleCase(matchOriginal(raw, family[2]));
-    const item = makeItem("family", `${titleCase(relation)}: ${name}`, { relation, name, tags:["family","important"], confidence: 1.0 });
-    const b = ensureBrain(businessId); b.items.push(item); indexItem(item); pruneMemoryItems(b);
-    return { say: `I'll remember that your ${relation} is named ${name}.` };
-  }
-
-  const remember = lower.match(/^(?:remember|don'?t forget)\s+(.+?)\.?$/i);
-  if (remember) {
-    const body = matchOriginal(raw, remember[1]);
-    const item = makeItem("note", body, { tags:["personal","reminder"], confidence:1.0, timestamp:new Date().toLocaleString() });
-    const b = ensureBrain(businessId); if (!isDuplicate(b.items, item.text)) { b.items.push(item); indexItem(item); pruneMemoryItems(b); }
-    return { say: "I've made a note of that for you." };
-  }
-
-  const doctorRecall = lower.match(/^what'?s\s+(?:my\s+)?doctor'?s?\s+name\??$/i);
-  if (doctorRecall) {
-    const b = ensureBrain(businessId);
-    const doctor = b.items.find(i => i.type === "medical-contact" && i.type_detail === "doctor");
-    return { say: doctor ? `Your doctor is ${doctor.name}.` : "I don't have your doctor's name saved yet. Would you like to tell me?" };
-  }
-
-  const whereIs = lower.match(/^where\s+(?:did\s+i\s+put|are)\s+(?:my\s+)?(.+?)\??$/i);
-  if (whereIs) {
-    const item = matchOriginal(raw, whereIs[1]);
-    const b = ensureBrain(businessId);
-    const relevant = scoreItems(b.items, `put ${item} location`).slice(0, 3);
-    if (relevant.length) {
-      const locations = relevant.map(r => r.text).join(". ");
-      return { say: `Let me think... ${locations}. Does that help?` };
-    }
-    return { say: `I don't have a note about where you put your ${item}. Next time, just tell me and I'll remember for you.` };
-  }
-
-  const familyRecall = lower.match(/^(?:what'?s|who'?s)\s+my\s+(son|daughter|grandson|granddaughter|child|grandchild)'?s?\s+name\??$/i);
-  if (familyRecall) {
-    const relation = familyRecall[1];
-    const b = ensureBrain(businessId);
-    const fm = b.items.find(i => i.type === "family" && i.relation?.toLowerCase() === relation.toLowerCase());
-    return { say: fm ? `Your ${relation} is ${fm.name}.` : `I don't have your ${relation}'s name saved. Would you like to tell me?` };
-  }
-
-  if (/^(?:clear|delete|forget)\s+(?:all\s+)?memory$/i.test(lower))
-    return { say: "Are you sure you want me to forget everything? If so, say 'yes, clear everything'." };
-
-  if (/^yes,?\s+clear\s+everything$/i.test(lower)) {
-    const b = ensureBrain(businessId);
-    b.items = []; b.conversations = []; brainVectors.clear();
-    return { say: "I've cleared all my memory. We can start fresh." };
   }
 
   if (/\b(medical|health|doctor|medicine|pain|hurt|sick|legal|lawyer|law|financial|money|investment)\b/.test(lower) &&
@@ -387,17 +254,8 @@ ${recentConversations.slice(-600)}`
     try {
       const res = await fetch(`${OPENAI_ROOT}/chat/completions`, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          max_tokens: 200,
-          temperature: 0.3,
-          frequency_penalty: 0.1
-        })
+        headers: { "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model, messages, max_tokens: 200, temperature: 0.3, frequency_penalty: 0.1 })
       });
       if (!res.ok) { lastErr = new Error(`Chat ${model} ${res.status}: ${await res.text()}`); continue; }
       const json = await res.json();
@@ -428,187 +286,79 @@ function sculptForSeniors(text){
 async function ttsRawOpenAI(text, voice, speed, model){
   const r = await fetch(`${OPENAI_ROOT}/audio/speech`, {
     method: "POST",
-    headers: {
-      "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model,
-      voice,
-      input: sculptForSeniors(text.slice(0, 4000)),
-      response_format: "mp3",
-      speed: Math.max(0.6, Math.min(1.0, speed))
-    })
+    headers: { "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model, voice, input: sculptForSeniors(text).slice(0, 4000), response_format: "mp3", speed: Math.max(0.6, Math.min(1.0, speed)) })
   });
   if (!r.ok) throw new Error(await r.text());
   const b = Buffer.from(await r.arrayBuffer());
   return b.toString("base64");
 }
 
-// FIXED ElevenLabs TTS Function
-async function ttsViaElevenLabs(text){
-  if (!ELEVEN_API_KEY || !ELEVEN_VOICE_ID) {
-    throw new Error("ElevenLabs API key or voice ID not configured");
+async function ttsViaElevenLabs(text, voiceId){
+  if (!ELEVEN_API_KEY || !voiceId) throw new Error("Missing ElevenLabs API key or voiceId");
+  const cleanText = sculptForSeniors(text).slice(0, 2500);
+  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+    method: "POST",
+    headers: { "xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json", "Accept": "audio/mpeg" },
+    body: JSON.stringify({
+      text: cleanText,
+      model_id: "eleven_multilingual_v2",
+      voice_settings: { stability: 0.7, similarity_boost: 0.8, style: 0.2, use_speaker_boost: true },
+      output_format: "mp3_44100_128"
+    })
+  });
+
+  if (!res.ok) {
+    const errTxt = await res.text();
+    throw new Error(`ElevenLabs ${res.status}: ${errTxt}`);
   }
 
-  // Clean and prepare text for ElevenLabs
-  const cleanText = sculptForSeniors(text).slice(0, 2500);
-  
-  console.log("Attempting ElevenLabs TTS with voice ID:", ELEVEN_VOICE_ID);
-  
-  try {
-    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE_ID}`, {
-      method: "POST",
-      headers: { 
-        "xi-api-key": ELEVEN_API_KEY, 
-        "Content-Type": "application/json",
-        "Accept": "audio/mpeg"
-      },
-      body: JSON.stringify({
-        text: cleanText,
-        model_id: "eleven_multilingual_v2",
-        voice_settings: {
-          stability: 0.7,
-          similarity_boost: 0.8,
-          style: 0.2,
-          use_speaker_boost: true
-        },
-        output_format: "mp3_44100_128"
-      })
-    });
-    
-    console.log("ElevenLabs response status:", res.status);
-    
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.error("ElevenLabs error:", errorText);
-      throw new Error(`ElevenLabs ${res.status}: ${errorText}`);
-    }
-    
-    const contentType = res.headers.get('content-type');
-    console.log("ElevenLabs response content-type:", contentType);
-    
-    const buf = Buffer.from(await res.arrayBuffer());
-    console.log("ElevenLabs audio buffer size:", buf.length);
-    
-    if (buf.length < 1000) {
-      throw new Error("ElevenLabs returned suspiciously small audio buffer");
-    }
-    
-    return buf.toString("base64");
-    
-  } catch (error) {
-    console.error("ElevenLabs TTS error:", error);
-    throw error;
-  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length < 1000) throw new Error("ElevenLabs returned tiny audio buffer");
+  return buf.toString("base64");
 }
 
-// IMPROVED safeTTS with better error handling and logging
-async function safeTTS(text, businessId){
+// Respect client's tts request. If engine === "eleven", hard-fail instead of silently falling back.
+async function safeTTS(text, businessId, ttsOpts = {}){
   const brain = ensureBrain(businessId);
   const speed = brain.speed || DEFAULT_SPEED;
   const refined = sculptForSeniors(text);
 
-  console.log("TTS attempt - ElevenLabs configured:", !!ELEVEN_API_KEY && !!ELEVEN_VOICE_ID);
-  console.log("Text length:", refined.length);
+  const wantEleven = ttsOpts?.engine === "eleven";
+  const voiceId = (ttsOpts?.voiceId || ELEVEN_VOICE_ID_ENV || "").trim();
 
-  // Try ElevenLabs first if configured
-  if (ELEVEN_API_KEY && ELEVEN_VOICE_ID) {
+  // Force ElevenLabs if explicitly requested
+  if (wantEleven) {
+    if (!ELEVEN_API_KEY) throw new Error("ElevenLabs required but ELEVENLABS_API_KEY is not configured");
+    if (!voiceId) throw new Error("ElevenLabs required but no voiceId provided (client tts.voiceId or ELEVENLABS_VOICE_ID)");
+    const b64 = await withRetry(() => ttsViaElevenLabs(refined, voiceId), 1);
+    return { dataUrl: `data:audio/mpeg;base64,${b64}`, engine: "elevenlabs", volumeBoost: SENIOR_VOLUME_BOOST };
+  }
+
+  // Prefer Eleven when available (soft fallback behavior)
+  if (ELEVEN_API_KEY && voiceId) {
     try {
-      console.log("Attempting ElevenLabs TTS...");
-      const b64 = await withRetry(() => ttsViaElevenLabs(refined), 2);
-      console.log("ElevenLabs TTS successful");
-      return { 
-        dataUrl: `data:audio/mpeg;base64,${b64}`, 
-        engine: "elevenlabs", 
-        volumeBoost: SENIOR_VOLUME_BOOST 
-      };
-    } catch (error) {
-      console.error("ElevenLabs TTS failed, falling back to OpenAI:", error.message);
-      // Continue to OpenAI fallback
+      const b64 = await withRetry(() => ttsViaElevenLabs(refined, voiceId), 2);
+      return { dataUrl: `data:audio/mpeg;base64,${b64}`, engine: "elevenlabs", volumeBoost: SENIOR_VOLUME_BOOST };
+    } catch (err) {
+      console.error("ElevenLabs TTS failed; falling back:", err.message);
     }
-  } else {
-    console.log("ElevenLabs not configured, using OpenAI TTS");
   }
 
-  // Fallback to OpenAI TTS
-  try {
-    const useHd = refined.length > 100;
-    const model = useHd ? TTS_MODEL_HD : TTS_MODEL_DEFAULT;
-    console.log("Using OpenAI TTS model:", model);
-    
-    const b64 = await withRetry(() => ttsRawOpenAI(refined, DEFAULT_VOICE, speed, model), 2);
-    console.log("OpenAI TTS successful");
-    
-    return {
-      dataUrl: `data:audio/mpeg;base64,${b64}`,
-      engine: useHd ? "openai-tts-1-hd" : "openai-tts-1",
-      volumeBoost: SENIOR_VOLUME_BOOST
-    };
-  } catch (error) {
-    console.error("OpenAI TTS also failed:", error);
-    throw new Error("Both ElevenLabs and OpenAI TTS failed");
-  }
+  // OpenAI fallback
+  const useHd = refined.length > 100;
+  const model = useHd ? TTS_MODEL_HD : TTS_MODEL_DEFAULT;
+  const b64 = await withRetry(() => ttsRawOpenAI(refined, DEFAULT_VOICE, speed, model), 2);
+  return { dataUrl: `data:audio/mpeg;base64,${b64}`, engine: useHd ? "openai-tts-1-hd" : "openai-tts-1", volumeBoost: SENIOR_VOLUME_BOOST };
 }
 
-// ---------- Memory ----------
+// ---------- Memory (minimal for this build) ----------
 function logConversationTurn(businessId, sessionId, content, role){
   const brain = ensureBrain(businessId);
   if (!brain.conversations) brain.conversations = [];
-  brain.conversations.push({
-    id: uid(),
-    sessionId,
-    role,
-    content,
-    timestamp: Date.now(),
-    date: new Date().toISOString().split('T')[0],
-    timeOfDay: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-  });
-  if (brain.conversations.length > 1000) {
-    brain.conversations = brain.conversations.slice(-1000);
-  }
-  if (role === "user") autoExtractSeniorInfo(businessId, content);
+  brain.conversations.push({ id: uid(), sessionId, role, content, timestamp: Date.now(), date: new Date().toISOString().split('T')[0] });
+  if (brain.conversations.length > 1000) brain.conversations = brain.conversations.slice(-1000);
 }
-
-function autoExtractSeniorInfo(businessId, text){
-  const brain = ensureBrain(businessId);
-  const familyMentions = text.match(/\b(?:my\s+(?:son|daughter|grandson|granddaughter|child|grandchild))\s+\w+/gi);
-  if (familyMentions) {
-    familyMentions.forEach(m => {
-      const item = makeItem("family-mention", m.trim(), { tags: ["family","auto-detected"], confidence: 0.6 });
-      if (!isDuplicate(brain.items, item.text)) { brain.items.push(item); indexItem(item); }
-    });
-  }
-  const locations = text.match(/\b(?:put|placed|left|stored)\s+.+?\s+(?:in|on|under|behind)\s+(?:the\s+)?(.+?)(?:\.|,|$)/gi);
-  if (locations) {
-    locations.forEach(m => {
-      if (m.length < 200) {
-        const item = makeItem("location", m.trim(), { tags: ["location","auto-detected"], confidence: 0.7 });
-        if (!isDuplicate(brain.items, item.text)) { brain.items.push(item); indexItem(item); }
-      }
-    });
-  }
-}
-
-function pruneMemoryItems(brain){
-  if (brain.items.length <= MAX_MEMORY_ITEMS) return;
-  const scored = brain.items.map(item => {
-    let score = item.confidence || 0.5;
-    const age = Date.now() - (item.updatedAt || item.createdAt);
-    const days = age / (1000 * 60 * 60 * 24);
-    if (item.type === "family") score += 0.3;
-    if (item.type === "medical-contact") score += 0.4;
-    if (item.type === "medication") score += 0.35;
-    if (item.tags?.includes("important")) score += 0.2;
-    score += Math.max(0, 0.1 - (days * 0.001));
-    return { ...item, _pruneScore: score };
-  });
-  scored.sort((a,b) => b._pruneScore - a._pruneScore);
-  const toRemove = scored.slice(MAX_MEMORY_ITEMS);
-  toRemove.forEach(it => brainVectors.delete(it.id));
-  brain.items = scored.slice(0, MAX_MEMORY_ITEMS);
-}
-
 function mergeShadow(businessId, shadow){
   const brain = ensureBrain(businessId);
   if (typeof shadow.pace === "number") brain.speed = Math.max(0.6, Math.min(1.0, shadow.pace));
@@ -617,14 +367,8 @@ function mergeShadow(businessId, shadow){
     for (const it of shadow.items) {
       if (!it || !it.text) continue;
       if (!it.id || !byId.has(it.id)) {
-        const newItem = {
-          ...it,
-          id: it.id || uid(),
-          createdAt: it.createdAt || Date.now(),
-          updatedAt: it.updatedAt || Date.now()
-        };
-        brain.items.push(newItem);
-        indexItem(newItem);
+        const newItem = { ...it, id: it.id || uid(), createdAt: it.createdAt || Date.now(), updatedAt: it.updatedAt || Date.now() };
+        brain.items.push(newItem); indexItem(newItem);
       }
     }
   }
@@ -638,17 +382,11 @@ function mergeShadow(businessId, shadow){
     brain.conversations.sort((a,b) => (a.timestamp || 0) - (b.timestamp || 0));
   }
 }
-
 function brainSnapshot(brain){
-  return {
-    items: brain.items,
-    conversations: brain.conversations || [],
-    voice: DEFAULT_VOICE,
-    pace: brain.speed
-  };
+  return { items: brain.items, conversations: brain.conversations || [], voice: DEFAULT_VOICE, pace: brain.speed };
 }
 
-// --- retry wrapper
+// --- retry
 async function withRetry(fn, n){
   try { return await fn(); }
   catch(e){
