@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Senior Voice Assistant</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    background:#f8f9fa;
+    display:flex;align-items:center;justify-content:center;
+    -webkit-user-select:none;user-select:none;
+    font-family:-apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+    touch-action:manipulation;
+  }
+  .voice-button{
+    width:160px;height:160px;border:none;border-radius:32px;background:#fff;
+    box-shadow:0 4px 16px rgba(0,0,0,.1), inset 0 -3px 0 rgba(0,0,0,.06);
+    cursor:pointer;position:relative;
+    transition:transform .06s ease, box-shadow .06s ease, background .15s ease, color .15s ease;
+    color:#1a1a1a;-webkit-tap-highlight-color:transparent;
+    font-size:14px;font-weight:500;
+  }
+  .voice-button:active,.voice-button.pressed{transform:scale(.98);box-shadow:inset 0 4px 12px rgba(0,0,0,.2),0 2px 4px rgba(0,0,0,.05)}
+  .voice-button.idle{background:#fff;color:#1a1a1a}
+  .voice-button.listening{background:#007AFF;color:#fff;box-shadow:0 0 0 4px rgba(0,122,255,.2), 0 4px 16px rgba(0,0,0,.15)}
+  .voice-button.thinking{background:#FFCC00;color:#1a1a1a}
+  .voice-button.speaking{background:#34C759;color:#fff}
+  .voice-button.error{background:#FF3B30;color:#fff}
+  .mic-icon{width:32px;height:32px;fill:currentColor}
+  
+  /* Accessibility improvements for seniors */
+  @media (prefers-reduced-motion: reduce) {
+    .voice-button { transition: none; }
+  }
+  
+  /* Larger touch targets on smaller screens */
+  @media (max-width: 480px) {
+    .voice-button { width: 180px; height: 180px; }
+    .mic-icon { width: 36px; height: 36px; }
+  }
+</style>
+</head>
+<body>
+  <button id="voiceBtn" class="voice-button idle" aria-label="Voice Assistant - Press to talk">
+    <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/>
+    </svg>
+  </button>
+
+  <input id="bizId" type="hidden" value="senior-assistant"/>
+
+<script>
+(() => {
+  const voiceBtn = document.getElementById('voiceBtn');
+  const BIZ_ID = (document.getElementById('bizId').value || 'senior-assistant');
+
+  // Debug logging for iOS Safari
+  console.log('iOS:', /iPad|iPhone|iPod/.test(navigator.userAgent));
+  console.log('Safari:', /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent));
+
+  // Enhanced persistent device memory for seniors
+  const LOCAL_KEY = `senior_voice_memory_${BIZ_ID}`;
+  function loadLocal(){ 
+    try { 
+      return JSON.parse(localStorage.getItem(LOCAL_KEY) || '{"items":[],"conversations":[],"voice":"alloy","pace":0.85,"boot":false}'); 
+    } catch { 
+      return {items:[],conversations:[],voice:"alloy",pace:0.85,boot:false}; 
+    } 
+  }
+  function saveLocal(m){ try { localStorage.setItem(LOCAL_KEY, JSON.stringify(m)); } catch(e) { console.log('Storage error:', e); } }
+  
+  let memoryShadow = loadLocal(); 
+  // Ensure senior-optimized defaults
+  memoryShadow.voice = "alloy"; 
+  memoryShadow.pace = memoryShadow.pace || 0.85;
+  if (!memoryShadow.conversations) memoryShadow.conversations = [];
+  saveLocal(memoryShadow);
+
+  // State
+  let isSessionActive=false,isListening=false,isProcessing=false,isSpeaking=false;
+  let sessionId=null,inflightController=null;
+  let audioCtx,micStream,micRecorder,chunks=[];
+  let audioProcessor,source,maxRecordTimer;
+  let startedAt=0,lastNonSilenceAt=0,audioPrimed=false,uiLock=false, hasBoot=false;
+
+  const speaker = new Audio(); 
+  speaker.preload="none"; 
+  speaker.playsInline=true;
+  // Senior-optimized audio settings
+  speaker.volume = 1.0; // Ensure full volume for seniors
+
+  function setBtnState(cls){ 
+    console.log('Setting button state to:', cls);
+    voiceBtn.className = `voice-button ${cls}`;
+    
+    // Update aria-label for screen readers
+    const labels = {
+      idle: 'Voice Assistant - Press to start talking',
+      listening: 'Listening - Press to stop',
+      thinking: 'Processing your message...',
+      speaking: 'Speaking - Press to interrupt',
+      error: 'Error occurred - Press to try again'
+    };
+    voiceBtn.setAttribute('aria-label', labels[cls] || labels.idle);
+  }
+
+  // Enhanced boot sequence for seniors with better error handling
+  async function bootOnce(){
+    if(hasBoot) return true;
+    
+    try{
+      // Create audio context immediately in the user gesture
+      if(!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      
+      // Resume audio context synchronously if needed
+      if(audioCtx.state !== 'running') {
+        await audioCtx.resume();
+      }
+      
+      // Prime audio with minimal operations
+      const buffer = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
+      const source = audioCtx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(audioCtx.destination);
+      source.start(0);
+      
+      // Prime HTMLAudio more reliably for seniors
+      const SILENCE = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+      speaker.volume = 0.01; // Very quiet instead of muted
+      speaker.src = SILENCE;
+      
+      // Don't await play() - just catch any errors
+      speaker.play().catch(() => {});
+      speaker.pause();
+      speaker.currentTime = 0;
+      speaker.volume = 1.0; // Restore full volume for seniors
+      
+      // Test mic permission with senior-friendly constraints
+      const testStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+      
+      // Immediately release the test stream
+      testStream.getTracks().forEach(track => track.stop());
+      
+      hasBoot = true;
+      memoryShadow.boot = true;
+      saveLocal(memoryShadow);
+      
+      console.log('Boot successful for senior assistant');
+      return true;
+      
+    } catch(e) {
+      console.log('Boot failed:', e);
+      setBtnState('error');
+      setTimeout(() => {
+        if(!isSessionActive) setBtnState('idle');
+      }, 1500); // Longer error display for seniors
+      hasBoot = false;
+      return false;
+    }
+  }
+
+  async function ensureAudioContext(){
+    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state!=='running') await audioCtx.resume();
+  }
+
+  function getPreferredMime(){
+    const isiOS=/iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isSafari=/Safari/.test(navigator.userAgent)&&!/Chrome/.test(navigator.userAgent);
+    if(isiOS||isSafari){
+      if(MediaRecorder.isTypeSupported("audio/mp4;codecs=mp4a.40.2")) return "audio/mp4;codecs=mp4a.40.2";
+      if(MediaRecorder.isTypeSupported("audio/mp4")) return "audio/mp4";
+    } else {
+      if(MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) return "audio/webm;codecs=opus";
+      if(MediaRecorder.isTypeSupported("audio/webm")) return "audio/webm";
+    }
+    return "";
+  }
+
+  // Senior-friendly microphone constraints with better fallback
+  async function getMicStreamWithFallback(probe=false){
+    const tries = [
+      { 
+        audio: { 
+          echoCancellation: true, 
+          noiseSuppression: true, 
+          autoGainControl: true, 
+          sampleRate: 48000, 
+          channelCount: 1 
+        }, 
+        video: false 
+      },
+      { audio: { echoCancellation: true, noiseSuppression: true }, video: false },
+      { audio: { echoCancellation: true }, video: false },
+      { audio: true, video: false }
+    ];
+    let lastErr;
+    for (const c of tries){
+      try {
+        const s = await navigator.mediaDevices.getUserMedia(c);
+        if (probe) return s;
+        return s;
+      } catch(e){ 
+        console.log('Mic constraint failed:', c, e);
+        lastErr = e; 
+      }
+    }
+    throw lastErr || new Error("getUserMedia failed");
+  }
+
+  function stopSpeaker(){ try{speaker.pause();speaker.currentTime=0;isSpeaking=false;}catch{} }
+  function cleanupAudioProcessing(){ clearTimeout(maxRecordTimer); try{audioProcessor?.disconnect();}catch{} audioProcessor=null; try{source?.disconnect();}catch{} source=null; }
+  function cleanupMicrophone(){ cleanupAudioProcessing(); try{ micStream?.getTracks().forEach(t=>t.stop()); }catch{} micStream=null; }
+
+  // Senior-optimized listening with longer timeouts
+  async function startListening(){
+    if(isListening || isProcessing) return;
+    
+    try {
+      isListening = true;
+      setBtnState('listening');
+      
+      // Ensure audio context is ready
+      if(!audioCtx || audioCtx.state !== 'running') {
+        await ensureAudioContext();
+      }
+      
+      // Get microphone with senior-friendly constraints
+      micStream = await getMicStreamWithFallback(false);
+      
+      // Create MediaRecorder with conservative settings for reliability
+      const mime = getPreferredMime();
+      const recorderOptions = {};
+      if(mime) recorderOptions.mimeType = mime;
+      
+      micRecorder = new MediaRecorder(micStream, recorderOptions);
+      
+      chunks = [];
+      startedAt = performance.now();
+      lastNonSilenceAt = startedAt;
+      
+      // Set up recorder events before starting
+      micRecorder.ondataavailable = (e) => {
+        if(e.data && e.data.size > 0) {
+          chunks.push(e.data);
+        }
+      };
+      
+      micRecorder.onstop = async () => {
+        isListening = false;
+        await processRecording();
+      };
+      
+      micRecorder.onerror = (e) => {
+        console.log('MediaRecorder error:', e);
+        isListening = false;
+        cleanupMicrophone();
+        setBtnState('error');
+      };
+      
+      // Start recording with smaller timeslices for better compatibility
+      micRecorder.start(100);
+      
+      // Set up audio processing for silence detection
+      setupAudioProcessing();
+      
+      // Longer safety timeout for seniors who may speak more slowly
+      maxRecordTimer = setTimeout(() => {
+        if(micRecorder && micRecorder.state === 'recording') {
+          try {
+            micRecorder.stop();
+          } catch(e) {
+            console.log('Stop recording error:', e);
+          }
+        }
+      }, 12000); // Extended to 12 seconds for seniors
+      
+    } catch(error) {
+      console.log('Start listening error:', error);
+      setBtnState('error');
+      setTimeout(() => {
+        if(!isSessionActive) setBtnState('idle');
+      }, 1500); // Longer error display
+      isListening = false;
+      cleanupMicrophone();
+    }
+  }
+
+  // Senior-optimized silence detection with more lenient thresholds
+  function setupAudioProcessing(){
+    try {
+      source = audioCtx.createMediaStreamSource(micStream);
+      audioProcessor = audioCtx.createScriptProcessor(1024, 1, 1);
+      let hasSpeech = false;
+      const MIN_MS = 500; // Shorter minimum for better responsiveness
+      const LINGER_MS = 1200; // Longer linger for seniors who may pause
+      const THRESH = 0.003; // Slightly more sensitive threshold
+      
+      source.connect(audioProcessor);
+      audioProcessor.connect(audioCtx.destination);
+      
+      audioProcessor.onaudioprocess = (ev) => {
+        if(!isListening) return;
+        const data = ev.inputBuffer.getChannelData(0);
+        let sum = 0;
+        for(let i = 0; i < data.length; i++) sum += Math.abs(data[i]);
+        const avg = sum / data.length;
+        const now = performance.now();
+        
+        if(avg > THRESH) {
+          hasSpeech = true;
+          lastNonSilenceAt = now;
+        }
+        
+        const elapsed = now - startedAt;
+        const since = now - lastNonSilenceAt;
+        
+        if(hasSpeech && elapsed > MIN_MS && since > LINGER_MS) {
+          try {
+            if(micRecorder.state === 'recording') micRecorder.stop();
+          } catch(e) {
+            console.log('Auto-stop error:', e);
+          }
+        }
+      };
+    } catch(e) {
+      console.log('Audio processing setup error:', e);
+    }
+  }
+
+  async function blobToBase64(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onloadend=()=>{ const s=String(r.result||""); res(s.split(",")[1]||"");}; r.onerror=()=>rej(r.error||new Error("readAsDataURL failed")); r.readAsDataURL(blob); }); }
+  async function getAudioDuration(blob){ return new Promise(r=>{ const a=new Audio(); a.onloadedmetadata=()=>r(a.duration||0); a.onerror=()=>r(0); a.src=URL.createObjectURL(blob); }); }
+
+  async function processRecording(){
+    if(!isSessionActive||isProcessing) return;
+    try{
+      isProcessing=true; setBtnState('thinking'); cleanupAudioProcessing();
+      console.log('Processing recording, chunks:', chunks.length);
+      const blob=new Blob(chunks,{type:micRecorder?.mimeType||'audio/webm'}); chunks=[];
+      console.log('Blob size:', blob.size, 'type:', blob.type);
+      
+      // More lenient threshold for seniors
+      if(!blob.size||blob.size<1500) {
+        console.log('Audio too short, continuing listening');
+        isProcessing=false; 
+        if(isSessionActive) setTimeout(()=>startListening(),200); 
+        else setBtnState('idle'); 
+        return; 
+      }
+      
+      const duration=await getAudioDuration(blob); 
+      console.log('Audio duration:', duration);
+      const b64=await blobToBase64(blob);
+      inflightController?.abort(); inflightController=new AbortController();
+      console.log('Sending to senior voice assistant...');
+      
+      // Updated payload structure for senior assistant
+      const payload={ 
+        businessId: BIZ_ID, 
+        sessionId, 
+        memoryShadow, 
+        audio: {
+          data: b64,
+          mime: blob.type||'audio/webm',
+          originalSize: blob.size,
+          processedSize: blob.size,
+          duration
+        } 
+      };
+      
+      const resp=await fetch('/.netlify/functions/voice',{ 
+        method:'POST', 
+        headers:{'Content-Type':'application/json'}, 
+        body:JSON.stringify(payload), 
+        signal:inflightController.signal 
+      });
+      
+      if(!resp.ok){ 
+        console.log('Server error:', resp.status, resp.statusText);
+        setBtnState('error'); 
+        setTimeout(()=>{ if(!isSessionActive) setBtnState('idle'); }, 1500); 
+        isProcessing=false; return; 
+      }
+      
+      const data=await resp.json();
+      console.log('Server response:', data);
+      
+      if(data.sessionId) sessionId=data.sessionId;
+      if(data.memoryShadow){ 
+        memoryShadow=data.memoryShadow; 
+        saveLocal(memoryShadow); 
+      }
+
+      if(data.control?.stopListening){ setBtnState('idle'); isProcessing=false; return; }
+      if(!data.audio){ 
+        isProcessing=false; 
+        if(isSessionActive) setTimeout(()=>startListening(),200); 
+        else setBtnState('idle'); 
+        return; 
+      }
+
+      await playResponse(data.audio);
+    }catch(e){
+      console.log('Processing error:', e);
+      setBtnState('error'); 
+      if(isSessionActive) setTimeout(()=>{ 
+        isProcessing=false; 
+        startListening(); 
+      }, 500); 
+      else { 
+        isProcessing=false; 
+      }
+    }finally{ 
+      cleanupMicrophone(); 
+    }
+  }
+
+  async function playResponse(dataUrl){
+    try{
+      isSpeaking=true; setBtnState('speaking');
+      await ensureAudioContext();
+      
+      // Try WebAudio first for better volume control
+      await playViaWebAudio(dataUrl); 
+      isSpeaking=false; isProcessing=false;
+      
+      if(isSessionActive){ 
+        setBtnState('listening'); 
+        setTimeout(()=>startListening(), 150); // Slightly longer pause for seniors
+      } else {
+        setBtnState('idle');
+      }
+    }catch(waErr){
+      try{ 
+        speaker.src=dataUrl; 
+        speaker.volume = 1.0; // Ensure full volume
+        await speaker.play();
+        speaker.onended=()=>{ 
+          isSpeaking=false; 
+          isProcessing=false; 
+          if(isSessionActive){ 
+            setBtnState('listening'); 
+            setTimeout(()=>startListening(), 150);
+          } else {
+            setBtnState('idle');
+          }
+        };
+      }catch{ 
+        isSpeaking=false; 
+        isProcessing=false; 
+        setBtnState('error'); 
+        if(isSessionActive) setTimeout(()=>startListening(), 300); 
+      }
+    }
+  }
+
+  async function playViaWebAudio(dataUrl){
+    await ensureAudioContext(); 
+    let buf;
+    try{ 
+      const r=await fetch(dataUrl); 
+      buf=await r.arrayBuffer(); 
+    }
+    catch{ 
+      const b=dataUrl.split(",")[1]||""; 
+      const bytes=Uint8Array.from(atob(b),c=>c.charCodeAt(0)); 
+      buf=bytes.buffer; 
+    }
+    const ab = await audioCtx.decodeAudioData(buf);
+    
+    // Create gain node for volume boost if needed
+    const gainNode = audioCtx.createGain();
+    gainNode.gain.value = 1.2; // Slight boost for seniors
+    
+    await new Promise(res=>{ 
+      const s=audioCtx.createBufferSource(); 
+      s.buffer=ab; 
+      s.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      s.onended=res; 
+      s.start(0); 
+    });
+  }
+
+  function stopSession(){
+    isSessionActive=false; isListening=false; isProcessing=false;
+    inflightController?.abort(); stopSpeaker();
+    try{ if(micRecorder?.state==='recording') micRecorder.stop(); }catch{}
+    cleanupMicrophone(); setBtnState('idle');
+  }
+
+  // Enhanced handleToggle with better senior-friendly feedback
+  async function handleToggle(e){
+    e.preventDefault();
+    if(uiLock) return;
+    
+    uiLock = true;
+    voiceBtn.classList.add('pressed');
+    
+    // Slightly longer press feedback for senior users
+    setTimeout(() => voiceBtn.classList.remove('pressed'), 120);
+    
+    try {
+      if(!memoryShadow.boot || !hasBoot) {
+        console.log('Initializing senior voice assistant...');
+        // Boot sequence must complete in this user gesture
+        const bootSuccess = await bootOnce();
+        if (!bootSuccess) {
+          uiLock = false;
+          return;
+        }
+        // Small delay to let iOS settle
+        await new Promise(resolve => setTimeout(resolve, 75));
+      }
+      
+      if(!isSessionActive) {
+        isSessionActive = true;
+        sessionId = 'senior_session_' + Date.now();
+        console.log('Starting senior assistant session:', sessionId);
+        // Start listening immediately after boot
+        await startListening();
+      } else {
+        console.log('Stopping senior assistant session');
+        stopSession();
+      }
+      
+    } catch(error) {
+      console.log('Toggle error:', error);
+      setBtnState('error');
+      setTimeout(() => {
+        if(!isSessionActive) setBtnState('idle');
+      }, 1000);
+    } finally {
+      // Longer timeout to prevent double-taps (important for seniors)
+      setTimeout(() => uiLock = false, 250);
+    }
+  }
+
+  voiceBtn.addEventListener('click', handleToggle, { passive: false });
+  
+  // Pressing while speaking interrupts playback
+  voiceBtn.addEventListener('click', () => { 
+    if(isSpeaking && isSessionActive){ 
+      console.log('Interrupting speech for senior user');
+      stopSpeaker(); 
+    } 
+  }, { passive: true });
+
+  // Add keyboard support for accessibility
+  voiceBtn.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleToggle(e);
+    }
+  });
+
+  console.log('Senior Voice Assistant UI initialized');
+
+})();
+</script>
+</body>
+</html>
