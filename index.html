@@ -59,7 +59,7 @@
           <textarea id="personaB" placeholder="e.g., '27-year-old university teacher who prioritizes pragmatism and scientific consensus.'"></textarea>
         </div>
       </div>
-      <label style="margin-top:8px;">Debate Topic (describe clearly; avoid social topics — blocked)</label>
+      <label style="margin-top:8px;">Debate Topic (describe clearly; social topics are blocked)</label>
       <textarea id="topic" placeholder="e.g., 'Should small businesses adopt AI bookkeeping in 2025? Outline benefits, risks, and a phased plan.'"></textarea>
 
       <div class="row" style="margin-top:8px;">
@@ -123,9 +123,7 @@
       audio.style.marginTop = '8px';
       wrap.appendChild(audio);
       if (!playing){
-        // auto-play first time; subsequent require user gesture on some browsers
         playing = true;
-        // attempt play; ignore errors
         audio.play?.().catch(()=>{});
       }
     }
@@ -178,22 +176,13 @@
         return;
       }
 
-      (data.turns||[]).forEach(t => {
-        addTurn(t.who, t.text, t.audio);
-      });
-
-      if (data.summary){
-        addTurn('Moderator Summary', data.summary.text, data.summary.audio);
-      }
+      (data.turns||[]).forEach(t => addTurn(t.who, t.text, t.audio));
+      if (data.summary) addTurn('Moderator Summary', data.summary.text, data.summary.audio);
 
       setStatus('Done.');
     } catch (e){
-      if (e.name === 'AbortError'){
-        setStatus('Stopped.');
-      } else {
-        console.log(e);
-        setStatus('Error. See console.');
-      }
+      setStatus(e.name === 'AbortError' ? 'Stopped.' : 'Error. See console.');
+      console.error(e);
     } finally {
       goBtn.disabled = false;
       aborter = null;
@@ -202,9 +191,7 @@
   }
 
   goBtn.addEventListener('click', runDebate);
-  stopBtn.addEventListener('click', () => {
-    if (aborter) aborter.abort();
-  });
+  stopBtn.addEventListener('click', () => aborter?.abort());
 })();
 </script>
 </body>
