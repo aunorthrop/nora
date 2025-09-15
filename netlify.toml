@@ -3,6 +3,6 @@
 
 [functions]
   node_bundler = "esbuild"
+  timeout = 26   # Netlify will clamp to your plan’s max; safe to leave
 
-[functions."debate"]
-  included_files = []
+# (no redirects needed; index.html is your root)
