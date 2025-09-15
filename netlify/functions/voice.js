@@ -1,7 +1,9 @@
-// Netlify Function: Senior-Optimized Voice Assistant (fixed build errors)
-// - Fixes corrupted matchOriginal()
-// - Removes duplicate ensureBrain()
-// - Keeps your senior-friendly settings and flows
+// Netlify Function: Senior-Optimized Voice Assistant (Fixed ElevenLabs Integration)
+// Key fixes:
+// - Better error handling for ElevenLabs API
+// - Improved API endpoint and request structure
+// - Added debugging and fallback logic
+// - Fixed audio format handling
 
 const OPENAI_ROOT = "https://api.openai.com/v1";
 
@@ -443,47 +445,110 @@ async function ttsRawOpenAI(text, voice, speed, model){
   return b.toString("base64");
 }
 
+// FIXED ElevenLabs TTS Function
 async function ttsViaElevenLabs(text){
-  if (!ELEVEN_API_KEY || !ELEVEN_VOICE_ID) throw new Error("ElevenLabs not configured");
-  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE_ID}`, {
-    method: "POST",
-    headers: { "xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      text: text.slice(0, 2500),
-      model_id: "eleven_multilingual_v2",
-      voice_settings: {
-        stability: 0.6,
-        similarity_boost: 0.9,
-        style: 0.1,
-        use_speaker_boost: true
-      }
-    })
-  });
-  if (!res.ok) throw new Error(`ElevenLabs ${res.status}: ${await res.text()}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  return buf.toString("base64");
+  if (!ELEVEN_API_KEY || !ELEVEN_VOICE_ID) {
+    throw new Error("ElevenLabs API key or voice ID not configured");
+  }
+
+  // Clean and prepare text for ElevenLabs
+  const cleanText = sculptForSeniors(text).slice(0, 2500);
+  
+  console.log("Attempting ElevenLabs TTS with voice ID:", ELEVEN_VOICE_ID);
+  
+  try {
+    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE_ID}`, {
+      method: "POST",
+      headers: { 
+        "xi-api-key": ELEVEN_API_KEY, 
+        "Content-Type": "application/json",
+        "Accept": "audio/mpeg"
+      },
+      body: JSON.stringify({
+        text: cleanText,
+        model_id: "eleven_multilingual_v2",
+        voice_settings: {
+          stability: 0.7,
+          similarity_boost: 0.8,
+          style: 0.2,
+          use_speaker_boost: true
+        },
+        output_format: "mp3_44100_128"
+      })
+    });
+    
+    console.log("ElevenLabs response status:", res.status);
+    
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error("ElevenLabs error:", errorText);
+      throw new Error(`ElevenLabs ${res.status}: ${errorText}`);
+    }
+    
+    const contentType = res.headers.get('content-type');
+    console.log("ElevenLabs response content-type:", contentType);
+    
+    const buf = Buffer.from(await res.arrayBuffer());
+    console.log("ElevenLabs audio buffer size:", buf.length);
+    
+    if (buf.length < 1000) {
+      throw new Error("ElevenLabs returned suspiciously small audio buffer");
+    }
+    
+    return buf.toString("base64");
+    
+  } catch (error) {
+    console.error("ElevenLabs TTS error:", error);
+    throw error;
+  }
 }
 
+// IMPROVED safeTTS with better error handling and logging
 async function safeTTS(text, businessId){
   const brain = ensureBrain(businessId);
   const speed = brain.speed || DEFAULT_SPEED;
   const refined = sculptForSeniors(text);
 
+  console.log("TTS attempt - ElevenLabs configured:", !!ELEVEN_API_KEY && !!ELEVEN_VOICE_ID);
+  console.log("Text length:", refined.length);
+
+  // Try ElevenLabs first if configured
   if (ELEVEN_API_KEY && ELEVEN_VOICE_ID) {
     try {
-      const b64 = await ttsViaElevenLabs(refined);
-      return { dataUrl: `data:audio/mpeg;base64,${b64}`, engine: "elevenlabs", volumeBoost: SENIOR_VOLUME_BOOST };
-    } catch (_) { /* fallback below */ }
+      console.log("Attempting ElevenLabs TTS...");
+      const b64 = await withRetry(() => ttsViaElevenLabs(refined), 2);
+      console.log("ElevenLabs TTS successful");
+      return { 
+        dataUrl: `data:audio/mpeg;base64,${b64}`, 
+        engine: "elevenlabs", 
+        volumeBoost: SENIOR_VOLUME_BOOST 
+      };
+    } catch (error) {
+      console.error("ElevenLabs TTS failed, falling back to OpenAI:", error.message);
+      // Continue to OpenAI fallback
+    }
+  } else {
+    console.log("ElevenLabs not configured, using OpenAI TTS");
   }
 
-  const useHd = refined.length > 100;
-  const model = useHd ? TTS_MODEL_HD : TTS_MODEL_DEFAULT;
-  const b64 = await ttsRawOpenAI(refined, DEFAULT_VOICE, speed, model);
-  return {
-    dataUrl: `data:audio/mpeg;base64,${b64}`,
-    engine: useHd ? "openai-tts-1-hd" : "openai-tts-1",
-    volumeBoost: SENIOR_VOLUME_BOOST
-  };
+  // Fallback to OpenAI TTS
+  try {
+    const useHd = refined.length > 100;
+    const model = useHd ? TTS_MODEL_HD : TTS_MODEL_DEFAULT;
+    console.log("Using OpenAI TTS model:", model);
+    
+    const b64 = await withRetry(() => ttsRawOpenAI(refined, DEFAULT_VOICE, speed, model), 2);
+    console.log("OpenAI TTS successful");
+    
+    return {
+      dataUrl: `data:audio/mpeg;base64,${b64}`,
+      engine: useHd ? "openai-tts-1-hd" : "openai-tts-1",
+      volumeBoost: SENIOR_VOLUME_BOOST
+    };
+  } catch (error) {
+    console.error("OpenAI TTS also failed:", error);
+    throw new Error("Both ElevenLabs and OpenAI TTS failed");
+  }
 }
 
 // ---------- Memory ----------
