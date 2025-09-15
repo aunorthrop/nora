@@ -3,195 +3,325 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Echo Chamber — AI Debate</title>
+<title>Nora — Voice Assistant</title>
 <style>
-  :root { --bg:#0b0c10; --panel:#14161b; --ink:#e6e6e6; --muted:#a9b0be; --line:#232734; --accent:#7ee7ff; --accent2:#a78bfa; }
-  *{box-sizing:border-box}
+  *{margin:0;padding:0;box-sizing:border-box}
   html,body{height:100%}
   body{
-    margin:0; background:var(--bg); color:var(--ink);
-    font-family: ui-sans-serif, system-ui, -apple-system, Inter, Segoe UI, Roboto, Helvetica, Arial;
-    display:flex; align-items:center; justify-content:center; padding:24px;
+    background:#0e1116; color:#e8e9ed;
+    display:flex;align-items:center;justify-content:center;
+    -webkit-user-select:none;user-select:none;
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",system-ui,sans-serif;
+    touch-action:manipulation; padding:24px;
   }
-  .wrap{width:min(980px,100%); display:grid; gap:16px}
-  .title{font-size:22px; font-weight:800; letter-spacing:.3px}
-  .card{
-    background:var(--panel); border-radius:16px; padding:16px;
-    border:1px solid var(--line);
-    box-shadow: 0 8px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.02);
+  .wrap{display:grid;gap:18px; width:min(520px,100%)}
+  .title{font-weight:800;letter-spacing:.2px}
+  .voice-button{
+    width:180px;height:180px;border:none;border-radius:28px;background:#131722;
+    box-shadow:0 4px 16px rgba(0,0,0,.25), inset 0 -3px 0 rgba(255,255,255,.04);
+    cursor:pointer;position:relative;margin:0 auto;display:grid;place-items:center;
+    transition:transform .06s ease, box-shadow .06s ease, background .15s ease, color .15s ease;
+    color:#e8e9ed;-webkit-tap-highlight-color:transparent;
+    font-size:14px;font-weight:600;border:1px solid #1d2433;
   }
-  label{display:block; font-size:13px; color:var(--muted); margin:6px 0}
-  input[type="text"], textarea, input[type="number"]{
-    width:100%; background:#0f1115; color:var(--ink);
-    border:1px solid var(--line); border-radius:12px; padding:12px 14px; font-size:14px;
-    outline:none; transition: border .12s, box-shadow .12s;
+  .voice-button:active,.voice-button.pressed{transform:scale(.98);box-shadow:inset 0 4px 12px rgba(0,0,0,.35),0 2px 4px rgba(0,0,0,.2)}
+  .voice-button.idle{background:#131722;color:#e8e9ed}
+  .voice-button.listening{background:#0b5cff;color:#fff;box-shadow:0 0 0 4px rgba(11,92,255,.18), 0 8px 24px rgba(0,0,0,.35)}
+  .voice-button.thinking{background:#ffd60a;color:#111}
+  .voice-button.speaking{background:#18c964;color:#0b0c10}
+  .voice-button.error{background:#ff3b30;color:#fff}
+
+  .mic-icon{width:40px;height:40px;fill:currentColor}
+  .status{font-size:12px;opacity:.8;text-align:center;min-height:18px}
+  .log{
+    background:#0b0f19;border:1px solid #1d2433;color:#cfd3dc;border-radius:14px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    padding:12px; font-size:12px; white-space:pre-wrap; max-height:38vh; overflow:auto;
   }
-  input:focus, textarea:focus{ border-color: var(--accent); box-shadow:0 0 0 3px rgba(126,231,255,.15) }
-  textarea{ min-height:90px; resize:vertical; }
-  .row{ display:grid; grid-template-columns:1fr 1fr; gap:12px }
-  .btn{
-    border:0; background:linear-gradient(135deg,var(--accent),var(--accent2));
-    color:#0b0c10; font-weight:800; padding:12px 16px; border-radius:12px; cursor:pointer;
-    transition: transform .06s ease, filter .12s ease; width:100%;
-  }
-  .btn:active{ transform: scale(.98); }
-  .btn[disabled]{ filter:grayscale(60%); cursor:not-allowed; }
-  .status{ font-size:13px; color:var(--muted); min-height:18px }
-  .log{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; white-space:pre-wrap; color:#d7dae0 }
-  .turn{ padding:12px; border:1px solid var(--line); border-radius:12px; margin:10px 0; background:#0f1115 }
-  .who{ font-weight:800; font-size:12px; color:#9ed7ff; letter-spacing:.2px; margin-bottom:6px }
-  .audio-controls{ display:flex; gap:8px; flex-wrap:wrap }
-  .pill{ background:#0f1115; border:1px solid var(--line); padding:6px 10px; border-radius:999px; font-size:12px; color:var(--muted) }
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .pill{font-size:12px;opacity:.85}
+  .controls{display:flex;gap:10px;justify-content:center}
+  button.small{padding:8px 12px;border-radius:10px;border:1px solid #1d2433;background:#131722;color:#e8e9ed;cursor:pointer}
 </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="title">Echo Chamber — two voices, one topic</div>
+    <div class="title">Nora — Voice Assistant</div>
 
-    <div class="card">
-      <div class="row">
-        <div>
-          <label>Persona A (prompt)</label>
-          <textarea id="personaA" placeholder="e.g., 'Conservative old man who values tradition and fiscal discipline.'"></textarea>
-        </div>
-        <div>
-          <label>Persona B (prompt)</label>
-          <textarea id="personaB" placeholder="e.g., '27-year-old university teacher who prioritizes pragmatism and scientific consensus.'"></textarea>
-        </div>
-      </div>
-      <label style="margin-top:8px;">Debate Topic (describe clearly; social topics are blocked)</label>
-      <textarea id="topic" placeholder="e.g., 'Should small businesses adopt AI bookkeeping in 2025? Outline benefits, risks, and a phased plan.'"></textarea>
+    <button id="voiceBtn" class="voice-button idle" aria-label="Nora — press to talk">
+      <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/>
+      </svg>
+    </button>
 
-      <div class="row" style="margin-top:8px;">
-        <div>
-          <label>Rounds (1–3)</label>
-          <input id="rounds" type="number" min="1" max="3" value="2"/>
-        </div>
-        <div>
-          <label>Include Moderator Recap</label>
-          <input id="withMod" type="checkbox" checked />
-        </div>
-      </div>
+    <div class="status" id="status">Idle</div>
 
-      <div class="row" style="margin-top:12px;">
-        <button id="go" class="btn">Run Debate</button>
-        <button id="stop" class="btn" style="background:#20232b;color:#e6e6e6;border:1px solid var(--line)">Stop</button>
-      </div>
-
-      <div class="status" id="status" style="margin-top:10px;">Idle</div>
+    <div class="controls">
+      <button id="clear" class="small">Clear log</button>
+      <button id="stop"  class="small">Stop</button>
     </div>
 
-    <div class="card">
-      <div class="audio-controls">
-        <div class="pill" id="engine">Engine: —</div>
-        <div class="pill" id="tts">TTS: —</div>
-      </div>
-      <div id="turns"></div>
-    </div>
+    <div id="log" class="log" aria-live="polite"></div>
+
+    <!-- business / memory scope -->
+    <input id="bizId" type="hidden" value="nora"/>
   </div>
 
 <script>
 (() => {
-  const qs = (id) => document.getElementById(id);
-  const personaA = qs('personaA');
-  const personaB = qs('personaB');
-  const topic    = qs('topic');
-  const rounds   = qs('rounds');
-  const withMod  = qs('withMod');
-  const goBtn    = qs('go');
-  const stopBtn  = qs('stop');
-  const statusEl = qs('status');
-  const turnsEl  = qs('turns');
-  const engineEl = qs('engine');
-  const ttsEl    = qs('tts');
+  const voiceBtn = document.getElementById('voiceBtn');
+  const statusEl = document.getElementById('status');
+  const logEl    = document.getElementById('log');
+  const stopBtn  = document.getElementById('stop');
+  const clearBtn = document.getElementById('clear');
+  const BIZ_ID   = (document.getElementById('bizId').value || 'nora');
 
-  let aborter = null;
-  let playing = false;
-
-  function setStatus(s){ statusEl.textContent = s; }
-  function addTurn(who, text, audioUrl){
-    const wrap = document.createElement('div');
-    wrap.className = 'turn';
-    const h = document.createElement('div');
-    h.className = 'who'; h.textContent = who;
-    const p = document.createElement('div');
-    p.className = 'log'; p.textContent = text;
-    wrap.appendChild(h); wrap.appendChild(p);
-    if (audioUrl){
-      const audio = document.createElement('audio');
-      audio.controls = true; audio.src = audioUrl; audio.preload = 'none';
-      audio.style.marginTop = '8px';
-      wrap.appendChild(audio);
-      if (!playing){
-        playing = true;
-        audio.play?.().catch(()=>{});
-      }
-    }
-    turnsEl.appendChild(wrap);
+  // persistent local settings
+  const LOCAL_KEY = `nora_voice_memory_${BIZ_ID}`;
+  function loadLocal(){
+    try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || '{"items":[],"conversations":[],"voice":"alloy","pace":0.95,"boot":false}'); }
+    catch { return { items:[], conversations:[], voice:"alloy", pace:0.95, boot:false }; }
   }
+  function saveLocal(m){ try { localStorage.setItem(LOCAL_KEY, JSON.stringify(m)); } catch(e){} }
+  let memoryShadow = loadLocal();
+  if (!memoryShadow.conversations) memoryShadow.conversations = [];
+  memoryShadow.voice = memoryShadow.voice || "alloy";
+  memoryShadow.pace  = typeof memoryShadow.pace === "number" ? memoryShadow.pace : 0.95;
+  saveLocal(memoryShadow);
 
-  async function runDebate(){
+  // state
+  let isSession=false,isListening=false,isProcessing=false,isSpeaking=false;
+  let sessionId=null,inflightController=null;
+  let audioCtx,micStream,micRecorder,chunks=[];
+  let audioProcessor,source,maxRecordTimer;
+  let startedAt=0,lastNonSilenceAt=0,hasBoot=false,uiLock=false;
+  const speaker = new Audio(); speaker.preload="none"; speaker.playsInline=true; speaker.volume=1.0;
+
+  function setBtnState(cls){
+    voiceBtn.className = `voice-button ${cls}`;
+    const label = {
+      idle:"Nora — press to talk",
+      listening:"Listening — press to stop",
+      thinking:"Processing…",
+      speaking:"Speaking — press to interrupt",
+      error:"Error — press to retry"
+    }[cls] || "Nora — press to talk";
+    voiceBtn.setAttribute('aria-label', label);
+    statusEl.textContent = label;
+  }
+  function log(msg){ const t = `[${new Date().toLocaleTimeString()}] ${msg}`; logEl.textContent += (logEl.textContent?'\n':'') + t; logEl.scrollTop = logEl.scrollHeight; }
+
+  async function bootOnce(){
+    if (hasBoot) return true;
     try{
-      turnsEl.innerHTML = '';
-      engineEl.textContent = 'Engine: —';
-      ttsEl.textContent = 'TTS: —';
-      setStatus('Starting…');
+      if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+      if(audioCtx.state!=='running') await audioCtx.resume();
 
-      const body = {
-        personaA: (personaA.value||'').trim(),
-        personaB: (personaB.value||'').trim(),
-        topic: (topic.value||'').trim(),
-        rounds: Math.max(1, Math.min(3, parseInt(rounds.value||'2',10))),
-        moderator: !!withMod.checked
-      };
-      if (!body.personaA || !body.personaB || !body.topic){
-        setStatus('Please fill Persona A, Persona B, and Topic.');
-        return;
-      }
+      // prime output
+      const buffer = audioCtx.createBuffer(1,1,audioCtx.sampleRate);
+      const src = audioCtx.createBufferSource(); src.buffer=buffer; src.connect(audioCtx.destination); src.start(0);
 
-      aborter = new AbortController();
-      goBtn.disabled = true;
+      // prime HTMLAudio (iOS)
+      const SILENCE = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+      speaker.volume = 0.01; speaker.src = SILENCE; speaker.play().catch(()=>{}); speaker.pause(); speaker.currentTime = 0; speaker.volume = 1.0;
 
-      const res = await fetch('/.netlify/functions/debate', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify(body),
-        signal: aborter.signal
-      });
+      // probe mic permission
+      const test = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true } });
+      test.getTracks().forEach(t=>t.stop());
 
-      if (!res.ok){
-        setStatus(`Server error: ${res.status}`);
-        goBtn.disabled = false;
-        return;
-      }
-
-      const data = await res.json();
-      engineEl.textContent = `Engine: ${data.model||'unknown'}`;
-      ttsEl.textContent    = `TTS: ${data.tts||'unknown'}`;
-
-      if (data.blocked){
-        setStatus('Topic blocked by safety rules (social topics).');
-        addTurn('Moderator', data.message || 'Blocked.');
-        goBtn.disabled = false;
-        return;
-      }
-
-      (data.turns||[]).forEach(t => addTurn(t.who, t.text, t.audio));
-      if (data.summary) addTurn('Moderator Summary', data.summary.text, data.summary.audio);
-
-      setStatus('Done.');
-    } catch (e){
-      setStatus(e.name === 'AbortError' ? 'Stopped.' : 'Error. See console.');
-      console.error(e);
-    } finally {
-      goBtn.disabled = false;
-      aborter = null;
-      playing = false;
+      hasBoot = true; memoryShadow.boot = true; saveLocal(memoryShadow);
+      log("Boot OK");
+      return true;
+    } catch(e){
+      log("Boot failed: " + e.message);
+      setBtnState('error');
+      hasBoot = false;
+      return false;
     }
   }
 
-  goBtn.addEventListener('click', runDebate);
-  stopBtn.addEventListener('click', () => aborter?.abort());
+  async function ensureAudioContext(){
+    if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state!=='running') await audioCtx.resume();
+  }
+
+  function getPreferredMime(){
+    const isiOS=/iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isSafari=/Safari/.test(navigator.userAgent)&&!/Chrome/.test(navigator.userAgent);
+    if(isiOS||isSafari){
+      if(MediaRecorder.isTypeSupported("audio/mp4;codecs=mp4a.40.2")) return "audio/mp4;codecs=mp4a.40.2";
+      if(MediaRecorder.isTypeSupported("audio/mp4")) return "audio/mp4";
+    } else {
+      if(MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) return "audio/webm;codecs=opus";
+      if(MediaRecorder.isTypeSupported("audio/webm")) return "audio/webm";
+    }
+    return "";
+  }
+
+  async function getMicStream(){
+    const tries = [
+      { audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:true, sampleRate:48000, channelCount:1 }, video:false },
+      { audio:{ echoCancellation:true, noiseSuppression:true }, video:false },
+      { audio:{ echoCancellation:true }, video:false },
+      { audio:true, video:false }
+    ];
+    let lastErr;
+    for(const c of tries){
+      try{ return await navigator.mediaDevices.getUserMedia(c); }
+      catch(e){ lastErr = e; }
+    }
+    throw lastErr || new Error("Microphone not available");
+  }
+
+  function stopSpeaker(){ try{ speaker.pause(); speaker.currentTime=0; isSpeaking=false; }catch{} }
+  function cleanupAudioProcessing(){ clearTimeout(maxRecordTimer); try{audioProcessor?.disconnect();}catch{} audioProcessor=null; try{source?.disconnect();}catch{} source=null; }
+  function cleanupMicrophone(){ cleanupAudioProcessing(); try{ micStream?.getTracks().forEach(t=>t.stop()); }catch{} micStream=null; }
+
+  async function startListening(){
+    if(isListening||isProcessing) return;
+    try{
+      isListening = true; setBtnState('listening');
+
+      await ensureAudioContext();
+      micStream = await getMicStream();
+      const mime = getPreferredMime();
+      const opts = {}; if(mime) opts.mimeType = mime;
+      micRecorder = new MediaRecorder(micStream, opts);
+      chunks = []; startedAt = performance.now(); lastNonSilenceAt = startedAt;
+
+      micRecorder.ondataavailable = (e)=>{ if(e.data && e.data.size>0) chunks.push(e.data); };
+      micRecorder.onstop = async ()=>{ isListening=false; await processRecording(); };
+      micRecorder.onerror = (e)=>{ log('Recorder error: ' + (e.error?.message||e.message||e)); isListening=false; cleanupMicrophone(); setBtnState('error'); };
+
+      micRecorder.start(100);
+      setupAudioProcessing();
+
+      maxRecordTimer = setTimeout(()=>{ try{ if(micRecorder?.state==='recording') micRecorder.stop(); }catch{} }, 12000);
+    }catch(e){
+      log("Start listen failed: " + e.message);
+      setBtnState('error'); isListening=false; cleanupMicrophone();
+    }
+  }
+
+  function setupAudioProcessing(){
+    try{
+      source = audioCtx.createMediaStreamSource(micStream);
+      audioProcessor = audioCtx.createScriptProcessor(1024,1,1);
+      let hasSpeech=false;
+      const MIN_MS=500, LINGER_MS=1100, THRESH=0.0035;
+      source.connect(audioProcessor); audioProcessor.connect(audioCtx.destination);
+      audioProcessor.onaudioprocess = (ev)=>{
+        if(!isListening) return;
+        const data = ev.inputBuffer.getChannelData(0);
+        let sum=0; for(let i=0;i<data.length;i++) sum+=Math.abs(data[i]);
+        const avg = sum / data.length; const now = performance.now();
+        if(avg>THRESH){ hasSpeech=true; lastNonSilenceAt=now; }
+        const elapsed = now-startedAt, since = now-lastNonSilenceAt;
+        if(hasSpeech && elapsed>MIN_MS && since>LINGER_MS){
+          try{ if(micRecorder?.state==='recording') micRecorder.stop(); }catch(e){}
+        }
+      };
+    }catch(e){ log("Audio processing setup error: " + e.message); }
+  }
+
+  async function blobToBase64(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onloadend=()=>{ const s=String(r.result||""); res(s.split(",")[1]||"");}; r.onerror=()=>rej(r.error||new Error("readAsDataURL failed")); r.readAsDataURL(blob); }); }
+  async function getAudioDuration(blob){ return new Promise(r=>{ const a=new Audio(); a.onloadedmetadata=()=>r(a.duration||0); a.onerror=()=>r(0); a.src=URL.createObjectURL(blob); }); }
+
+  async function processRecording(){
+    if(!isSession||isProcessing) return;
+    try{
+      isProcessing=true; setBtnState('thinking'); cleanupAudioProcessing();
+      const blob=new Blob(chunks,{type:micRecorder?.mimeType||'audio/webm'}); chunks=[];
+      if(!blob.size || blob.size<1500){ isProcessing=false; if(isSession) setTimeout(()=>startListening(),200); else setBtnState('idle'); return; }
+      const duration=await getAudioDuration(blob);
+      const b64 = await blobToBase64(blob);
+      inflightController?.abort(); inflightController = new AbortController();
+      const payload = {
+        businessId: BIZ_ID,
+        sessionId,
+        memoryShadow,
+        audio:{ data:b64, mime: blob.type||'audio/webm', originalSize: blob.size, processedSize: blob.size, duration }
+      };
+      const resp = await fetch('/.netlify/functions/voice',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload), signal:inflightController.signal });
+      if(!resp.ok){ setBtnState('error'); log("Server error: " + resp.status + " " + resp.statusText); isProcessing=false; return; }
+      const data = await resp.json();
+      if(data.sessionId) sessionId = data.sessionId;
+      if(data.memoryShadow){ memoryShadow = data.memoryShadow; saveLocal(memoryShadow); }
+
+      if(data.control?.stopListening){ setBtnState('idle'); isProcessing=false; return; }
+      if(!data.audio){ isProcessing=false; if(isSession) setTimeout(()=>startListening(),200); else setBtnState('idle'); log("No audio in response; text: " + (data.response||"(none)")); return; }
+
+      log("You: " + (data.transcript||"(no transcript)"));
+      log("Nora: " + (data.response||"(no text)"));
+
+      await playResponse(data.audio);
+    }catch(e){
+      log("Processing error: " + e.message);
+      setBtnState('error');
+      if(isSession) setTimeout(()=>{ isProcessing=false; startListening(); }, 500); else isProcessing=false;
+    }finally{ cleanupMicrophone(); }
+  }
+
+  async function playResponse(dataUrl){
+    try{
+      isSpeaking=true; setBtnState('speaking');
+      await ensureAudioContext();
+      await playViaWebAudio(dataUrl);
+      isSpeaking=false; isProcessing=false;
+      if(isSession){ setBtnState('listening'); setTimeout(()=>startListening(),150); } else setBtnState('idle');
+    }catch{
+      try{
+        speaker.src=dataUrl; speaker.volume=1.0;
+        await speaker.play();
+        speaker.onended=()=>{ isSpeaking=false; isProcessing=false; if(isSession){ setBtnState('listening'); setTimeout(()=>startListening(),150);} else setBtnState('idle'); };
+      }catch{
+        isSpeaking=false; isProcessing=false; setBtnState('error'); if(isSession) setTimeout(()=>startListening(),300);
+      }
+    }
+  }
+
+  async function playViaWebAudio(dataUrl){
+    await ensureAudioContext();
+    let buf;
+    try{ const r=await fetch(dataUrl); buf=await r.arrayBuffer(); }
+    catch{ const b=dataUrl.split(",")[1]||""; const bytes=Uint8Array.from(atob(b),c=>c.charCodeAt(0)); buf=bytes.buffer; }
+    const ab = await audioCtx.decodeAudioData(buf);
+    const gain = audioCtx.createGain(); gain.gain.value = 1.15;
+    await new Promise(res=>{
+      const s=audioCtx.createBufferSource(); s.buffer=ab; s.connect(gain); gain.connect(audioCtx.destination);
+      s.onended=res; s.start(0);
+    });
+  }
+
+  function stopSession(){
+    isSession=false; isListening=false; isProcessing=false;
+    inflightController?.abort(); stopSpeaker();
+    try{ if(micRecorder?.state==='recording') micRecorder.stop(); }catch{}
+    cleanupMicrophone(); setBtnState('idle'); log("Session stopped.");
+  }
+
+  async function handleToggle(e){
+    e.preventDefault(); if(uiLock) return; uiLock=true; voiceBtn.classList.add('pressed'); setTimeout(()=>voiceBtn.classList.remove('pressed'),120);
+    try{
+      if(!memoryShadow.boot || !hasBoot){ const ok = await bootOnce(); if(!ok){ uiLock=false; return; } await new Promise(r=>setTimeout(r,75)); }
+      if(!isSession){ isSession=true; sessionId='nora_'+Date.now(); log("Session: "+sessionId); await startListening(); }
+      else { stopSession(); }
+    } catch(err){
+      log("Toggle error: " + err.message); setBtnState('error'); setTimeout(()=>{ if(!isSession) setBtnState('idle'); }, 900);
+    } finally {
+      setTimeout(()=>uiLock=false, 250);
+    }
+  }
+
+  voiceBtn.addEventListener('click', handleToggle, { passive:false });
+  voiceBtn.addEventListener('click', ()=>{ if(isSpeaking && isSession){ stopSpeaker(); } }, { passive:true });
+  voiceBtn.addEventListener('keydown', (e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); handleToggle(e);} });
+
+  stopBtn.addEventListener('click', stopSession);
+  clearBtn.addEventListener('click', ()=>{ logEl.textContent=''; });
+
+  setBtnState('idle');
+  log("Nora UI ready.");
 })();
 </script>
 </body>
