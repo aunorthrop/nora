@@ -138,8 +138,6 @@ exports.handler = async (event) => {
     
     // Check for required API keys
     if (!process.env.OPENAI_API_KEY) return reply(500, { error: "OPENAI_API_KEY not configured" }, headers);
-    if (!ELEVEN_API_KEY) return reply(500, { error: "ELEVENLABS_API_KEY not configured" }, headers);
-    if (!ELEVEN_VOICE_ID) return reply(500, { error: "ELEVENLABS_VOICE_ID not configured" }, headers);
 
     const body = safeJson(event.body);
     if (!body) return reply(400, { error: "Invalid JSON body" }, headers);
@@ -159,7 +157,10 @@ exports.handler = async (event) => {
       transcript = await withRetry(() => transcribeForSeniors(audio.data, audio.mime), 2);
     } catch (e) {
       const msg = "I'm having trouble hearing you. Could you please speak a bit louder and try again?";
-      const speech = await elevenLabsTTS(msg).catch(() => null);
+      const speech = await elevenLabsTTS(msg).catch((err) => {
+        console.log("TTS failed for STT error:", err.message);
+        return null;
+      });
       return reply(200, {
         sessionId: sid, transcript: "", response: msg,
         audio: speech?.dataUrl, ttsEngine: speech?.engine,
@@ -170,7 +171,10 @@ exports.handler = async (event) => {
     const words = (transcript || "").trim().split(/\s+/).filter(Boolean);
     if (!transcript?.trim() || words.length < 1) {
       const ask = "I heard something, but I'm not sure what you said. Could you repeat that for me?";
-      const speech = await elevenLabsTTS(ask).catch(() => null);
+      const speech = await elevenLabsTTS(ask).catch((err) => {
+        console.log("TTS failed for empty transcript:", err.message);
+        return null;
+      });
       return reply(200, {
         sessionId: sid, transcript, response: ask,
         audio: speech?.dataUrl, ttsEngine: speech?.engine,
@@ -184,7 +188,10 @@ exports.handler = async (event) => {
     const fast = await routeIntentForSeniors(businessId, sid, transcript);
     if (fast) {
       logConversationTurn(businessId, sid, fast.say, "assistant");
-      const speech = await elevenLabsTTS(fast.say).catch(() => null);
+      const speech = await elevenLabsTTS(fast.say).catch((err) => {
+        console.log("TTS failed for quick intent:", err.message);
+        return null;
+      });
       return reply(200, {
         sessionId: sid, transcript, response: fast.say,
         audio: speech?.dataUrl, ttsEngine: speech?.engine,
@@ -197,7 +204,10 @@ exports.handler = async (event) => {
     const answer = await chatWithSeniorMemory(sid, businessId, transcript)
       .catch(() => "I'm having a small technical issue. Could you try that again?");
     logConversationTurn(businessId, sid, answer, "assistant");
-    const speech = await elevenLabsTTS(answer).catch(() => null);
+    const speech = await elevenLabsTTS(answer).catch((err) => {
+      console.log("TTS failed for main chat:", err.message);
+      return null;
+    });
 
     return reply(200, {
       sessionId: sid, transcript, response: answer,
@@ -424,19 +434,22 @@ function sculptForSeniors(text){
 }
 
 async function elevenLabsTTS(text){
-  console.log("Using ElevenLabs TTS for:", text.slice(0, 50) + "...");
+  console.log("Attempting ElevenLabs TTS for:", text.slice(0, 50) + "...");
   
   if (!ELEVEN_API_KEY) {
-    throw new Error("ElevenLabs API key not configured");
+    console.log("ElevenLabs API key not configured - returning without audio");
+    return null;
   }
   
   if (!ELEVEN_VOICE_ID) {
-    throw new Error("ElevenLabs Voice ID not configured");
+    console.log("ElevenLabs Voice ID not configured - returning without audio");
+    return null;
   }
 
   const sculptedText = sculptForSeniors(text);
   
   try {
+    console.log("Making ElevenLabs API call...");
     const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE_ID}`, {
       method: "POST",
       headers: { 
@@ -465,7 +478,7 @@ async function elevenLabsTTS(text){
     const buf = Buffer.from(await res.arrayBuffer());
     const b64 = buf.toString("base64");
     
-    console.log("ElevenLabs TTS successful, audio length:", buf.length);
+    console.log("ElevenLabs TTS successful! Audio length:", buf.length);
     
     return { 
       dataUrl: `data:audio/mpeg;base64,${b64}`, 
@@ -473,8 +486,8 @@ async function elevenLabsTTS(text){
       volumeBoost: SENIOR_VOLUME_BOOST 
     };
   } catch (error) {
-    console.error("ElevenLabs TTS Error:", error);
-    throw error;
+    console.error("ElevenLabs TTS Error:", error.message);
+    return null;
   }
 }
 
