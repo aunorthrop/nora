@@ -14,7 +14,6 @@
     font-family:-apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
     touch-action:manipulation;
   }
-  .wrapper{display:flex;flex-direction:column;gap:16px;align-items:center}
   .voice-button{
     width:160px;height:160px;border:none;border-radius:32px;background:#fff;
     box-shadow:0 4px 16px rgba(0,0,0,.1), inset 0 -3px 0 rgba(0,0,0,.06);
@@ -30,75 +29,50 @@
   .voice-button.speaking{background:#34C759;color:#fff}
   .voice-button.error{background:#FF3B30;color:#fff}
   .mic-icon{width:32px;height:32px;fill:currentColor}
-  label{font-size:14px;color:#333}
-  input[type="text"]{padding:8px 10px;border:1px solid #ddd;border-radius:8px;width:320px;max-width:80vw}
-  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center}
   @media (prefers-reduced-motion: reduce) { .voice-button { transition: none; } }
   @media (max-width: 480px) { .voice-button { width: 180px; height: 180px; } .mic-icon { width: 36px; height: 36px; } }
+  /* invisible live region for non-intrusive errors/status */
+  .sr { position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden; }
 </style>
 </head>
 <body>
-  <div class="wrapper">
-    <div class="row">
-      <label for="elevenId">ElevenLabs Voice ID:</label>
-      <input id="elevenId" type="text" placeholder="Paste your Voice ID (not name)"/>
-      <button id="saveVoice" style="padding:8px 12px;border:0;border-radius:8px;background:#eee;cursor:pointer">Save</button>
-    </div>
+  <button id="voiceBtn" class="voice-button idle" aria-label="Voice Assistant - Press to talk" title="TTS: unknown">
+    <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/>
+    </svg>
+  </button>
 
-    <button id="voiceBtn" class="voice-button idle" aria-label="Voice Assistant - Press to talk" title="TTS: unknown">
-      <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/>
-      </svg>
-    </button>
-  </div>
-
+  <div id="live" class="sr" aria-live="polite"></div>
   <input id="bizId" type="hidden" value="senior-assistant"/>
 
 <script>
 (() => {
   const voiceBtn = document.getElementById('voiceBtn');
-  const saveBtn = document.getElementById('saveVoice');
-  const elevenInput = document.getElementById('elevenId');
+  const live = document.getElementById('live');
   const BIZ_ID = (document.getElementById('bizId').value || 'senior-assistant');
 
-  // Debug (iOS Safari)
-  console.log('iOS:', /iPad|iPhone|iPod/.test(navigator.userAgent));
-  console.log('Safari:', /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent));
-
-  // Persistent local memory
+  // Persist local state (no UI clutter)
   const LOCAL_KEY = `senior_voice_memory_${BIZ_ID}`;
   function loadLocal(){ 
     try { 
-      return JSON.parse(localStorage.getItem(LOCAL_KEY) || '{"items":[],"conversations":[],"voice":"alloy","pace":0.85,"boot":false}'); 
+      return JSON.parse(localStorage.getItem(LOCAL_KEY) || '{"items":[],"conversations":[],"voice":"alloy","pace":0.85,"boot":false}');
     } catch { 
       return {items:[],conversations:[],voice:"alloy",pace:0.85,boot:false}; 
     } 
   }
-  function saveLocal(m){ try { localStorage.setItem(LOCAL_KEY, JSON.stringify(m)); } catch(e) { console.log('Storage error:', e); } }
-
+  function saveLocal(m){ try { localStorage.setItem(LOCAL_KEY, JSON.stringify(m)); } catch(e) {} }
   let memoryShadow = loadLocal(); 
   memoryShadow.voice = "alloy"; 
   memoryShadow.pace = memoryShadow.pace || 0.85;
   if (!memoryShadow.conversations) memoryShadow.conversations = [];
-  if (!memoryShadow.elevenVoiceId) memoryShadow.elevenVoiceId = "";  // NEW
   saveLocal(memoryShadow);
-
-  // Populate voice ID input
-  elevenInput.value = memoryShadow.elevenVoiceId || "";
-
-  saveBtn.addEventListener('click', () => {
-    memoryShadow.elevenVoiceId = (elevenInput.value || "").trim();
-    saveLocal(memoryShadow);
-    saveBtn.textContent = "Saved";
-    setTimeout(() => saveBtn.textContent = "Save", 1000);
-  });
 
   // State
   let isSessionActive=false,isListening=false,isProcessing=false,isSpeaking=false;
   let sessionId=null,inflightController=null;
   let audioCtx,micStream,micRecorder,chunks=[];
   let audioProcessor,source,maxRecordTimer;
-  let startedAt=0,lastNonSilenceAt=0,audioPrimed=false,uiLock=false, hasBoot=false;
+  let startedAt=0,lastNonSilenceAt=0,hasBoot=false;
 
   const speaker = new Audio(); 
   speaker.preload="none"; 
@@ -116,6 +90,7 @@
     };
     voiceBtn.setAttribute('aria-label', labels[cls] || labels.idle);
   }
+  function announce(msg){ live.textContent = msg; }
 
   async function bootOnce(){
     if(hasBoot) return true;
@@ -254,8 +229,8 @@
         businessId: BIZ_ID, 
         sessionId, 
         memoryShadow,
-        // Force ElevenLabs; pass per-turn voiceId from local settings
-        tts: { engine: "eleven", voiceId: (memoryShadow.elevenVoiceId || "").trim() || undefined },
+        // We want Eleven from env vars – no Voice ID in UI.
+        tts: { engine: "eleven" },
         audio: { data: b64, mime: blob.type||'audio/webm', originalSize: blob.size, processedSize: blob.size, duration }
       };
       
@@ -266,6 +241,7 @@
       
       if(!resp.ok){ 
         console.log('Server error:', resp.status, resp.statusText);
+        announce('Server error');
         setBtnState('error'); 
         setTimeout(()=>{ if(!isSessionActive) setBtnState('idle'); }, 1500); 
         isProcessing=false; return; 
@@ -274,24 +250,28 @@
       const data=await resp.json();
       console.log('Server response:', data);
 
-      // Display engine + possible server error message
       if (data.ttsEngine) {
         console.log("[TTS ENGINE]", data.ttsEngine);
         voiceBtn.title = `TTS: ${data.ttsEngine}`;
+        announce(`Speaking with ${data.ttsEngine}`);
       }
       if (data.error) {
         console.warn("[SERVER ERROR]", data.error);
+        announce(data.error);
       }
 
       if(data.sessionId) sessionId=data.sessionId;
       if(data.memoryShadow){ memoryShadow=data.memoryShadow; saveLocal(memoryShadow); }
 
       if(data.control?.stopListening){ setBtnState('idle'); isProcessing=false; return; }
+
+      // Always try to play whatever came back; if null, we resume listening.
       if(!data.audio){ isProcessing=false; if(isSessionActive) setTimeout(()=>startListening(),200); else setBtnState('idle'); return; }
 
       await playResponse(data.audio);
     }catch(e){
       console.log('Processing error:', e);
+      announce('Processing error');
       setBtnState('error'); 
       if(isSessionActive) setTimeout(()=>{ isProcessing=false; startListening(); }, 500); else { isProcessing=false; }
     }finally{ cleanupMicrophone(); }
@@ -346,6 +326,7 @@
       else { stopSession(); }
     }catch(err){
       console.log('Toggle error:', err);
+      announce('Toggle error');
       setBtnState('error'); setTimeout(()=>{ if(!isSessionActive) setBtnState('idle'); }, 1000);
     }
   }
