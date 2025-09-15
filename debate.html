@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Echo Chamber — AI Debate</title>
+<style>
+  :root { --bg:#0b0c10; --panel:#14161b; --ink:#e6e6e6; --muted:#a9b0be; --line:#232734; --accent:#7ee7ff; --accent2:#a78bfa; }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, Inter, Segoe UI, Roboto, Helvetica, Arial;
+    display:flex; align-items:center; justify-content:center; padding:24px;
+  }
+  .wrap{width:min(980px,100%); display:grid; gap:16px}
+  .title{font-size:22px; font-weight:800; letter-spacing:.3px}
+  .card{
+    background:var(--panel); border-radius:16px; padding:16px;
+    border:1px solid var(--line);
+    box-shadow: 0 8px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.02);
+  }
+  label{display:block; font-size:13px; color:var(--muted); margin:6px 0}
+  input[type="text"], textarea, input[type="number"]{
+    width:100%; background:#0f1115; color:var(--ink);
+    border:1px solid var(--line); border-radius:12px; padding:12px 14px; font-size:14px;
+    outline:none; transition: border .12s, box-shadow .12s;
+  }
+  input:focus, textarea:focus{ border-color: var(--accent); box-shadow:0 0 0 3px rgba(126,231,255,.15) }
+  textarea{ min-height:90px; resize:vertical; }
+  .row{ display:grid; grid-template-columns:1fr 1fr; gap:12px }
+  .btn{
+    border:0; background:linear-gradient(135deg,var(--accent),var(--accent2));
+    color:#0b0c10; font-weight:800; padding:12px 16px; border-radius:12px; cursor:pointer;
+    transition: transform .06s ease, filter .12s ease; width:100%;
+  }
+  .btn:active{ transform: scale(.98); }
+  .btn[disabled]{ filter:grayscale(60%); cursor:not-allowed; }
+  .status{ font-size:13px; color:var(--muted); min-height:18px }
+  .log{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; white-space:pre-wrap; color:#d7dae0 }
+  .turn{ padding:12px; border:1px solid var(--line); border-radius:12px; margin:10px 0; background:#0f1115 }
+  .who{ font-weight:800; font-size:12px; color:#9ed7ff; letter-spacing:.2px; margin-bottom:6px }
+  .audio-controls{ display:flex; gap:8px; flex-wrap:wrap }
+  .pill{ background:#0f1115; border:1px solid var(--line); padding:6px 10px; border-radius:999px; font-size:12px; color:var(--muted) }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="title">Echo Chamber — two voices, one topic</div>
+
+    <div class="card">
+      <div class="row">
+        <div>
+          <label>Persona A (prompt)</label>
+          <textarea id="personaA" placeholder="e.g., 'Conservative old man who values tradition and fiscal discipline.'"></textarea>
+        </div>
+        <div>
+          <label>Persona B (prompt)</label>
+          <textarea id="personaB" placeholder="e.g., '27-year-old university teacher who prioritizes pragmatism and scientific consensus.'"></textarea>
+        </div>
+      </div>
+      <label style="margin-top:8px;">Debate Topic (describe clearly; avoid social topics — blocked)</label>
+      <textarea id="topic" placeholder="e.g., 'Should small businesses adopt AI bookkeeping in 2025? Outline benefits, risks, and a phased plan.'"></textarea>
+
+      <div class="row" style="margin-top:8px;">
+        <div>
+          <label>Rounds (1–3)</label>
+          <input id="rounds" type="number" min="1" max="3" value="2"/>
+        </div>
+        <div>
+          <label>Include Moderator Recap</label>
+          <input id="withMod" type="checkbox" checked />
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <button id="go" class="btn">Run Debate</button>
+        <button id="stop" class="btn" style="background:#20232b;color:#e6e6e6;border:1px solid var(--line)">Stop</button>
+      </div>
+
+      <div class="status" id="status" style="margin-top:10px;">Idle</div>
+    </div>
+
+    <div class="card">
+      <div class="audio-controls">
+        <div class="pill" id="engine">Engine: —</div>
+        <div class="pill" id="tts">TTS: —</div>
+      </div>
+      <div id="turns"></div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const qs = (id) => document.getElementById(id);
+  const personaA = qs('personaA');
+  const personaB = qs('personaB');
+  const topic    = qs('topic');
+  const rounds   = qs('rounds');
+  const withMod  = qs('withMod');
+  const goBtn    = qs('go');
+  const stopBtn  = qs('stop');
+  const statusEl = qs('status');
+  const turnsEl  = qs('turns');
+  const engineEl = qs('engine');
+  const ttsEl    = qs('tts');
+
+  let aborter = null;
+  let playing = false;
+
+  function setStatus(s){ statusEl.textContent = s; }
+  function addTurn(who, text, audioUrl){
+    const wrap = document.createElement('div');
+    wrap.className = 'turn';
+    const h = document.createElement('div');
+    h.className = 'who'; h.textContent = who;
+    const p = document.createElement('div');
+    p.className = 'log'; p.textContent = text;
+    wrap.appendChild(h); wrap.appendChild(p);
+    if (audioUrl){
+      const audio = document.createElement('audio');
+      audio.controls = true; audio.src = audioUrl; audio.preload = 'none';
+      audio.style.marginTop = '8px';
+      wrap.appendChild(audio);
+      if (!playing){
+        // auto-play first time; subsequent require user gesture on some browsers
+        playing = true;
+        // attempt play; ignore errors
+        audio.play?.().catch(()=>{});
+      }
+    }
+    turnsEl.appendChild(wrap);
+  }
+
+  async function runDebate(){
+    try{
+      turnsEl.innerHTML = '';
+      engineEl.textContent = 'Engine: —';
+      ttsEl.textContent = 'TTS: —';
+      setStatus('Starting…');
+
+      const body = {
+        personaA: (personaA.value||'').trim(),
+        personaB: (personaB.value||'').trim(),
+        topic: (topic.value||'').trim(),
+        rounds: Math.max(1, Math.min(3, parseInt(rounds.value||'2',10))),
+        moderator: !!withMod.checked
+      };
+      if (!body.personaA || !body.personaB || !body.topic){
+        setStatus('Please fill Persona A, Persona B, and Topic.');
+        return;
+      }
+
+      aborter = new AbortController();
+      goBtn.disabled = true;
+
+      const res = await fetch('/.netlify/functions/debate', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(body),
+        signal: aborter.signal
+      });
+
+      if (!res.ok){
+        setStatus(`Server error: ${res.status}`);
+        goBtn.disabled = false;
+        return;
+      }
+
+      const data = await res.json();
+      engineEl.textContent = `Engine: ${data.model||'unknown'}`;
+      ttsEl.textContent    = `TTS: ${data.tts||'unknown'}`;
+
+      if (data.blocked){
+        setStatus('Topic blocked by safety rules (social topics).');
+        addTurn('Moderator', data.message || 'Blocked.');
+        goBtn.disabled = false;
+        return;
+      }
+
+      (data.turns||[]).forEach(t => {
+        addTurn(t.who, t.text, t.audio);
+      });
+
+      if (data.summary){
+        addTurn('Moderator Summary', data.summary.text, data.summary.audio);
+      }
+
+      setStatus('Done.');
+    } catch (e){
+      if (e.name === 'AbortError'){
+        setStatus('Stopped.');
+      } else {
+        console.log(e);
+        setStatus('Error. See console.');
+      }
+    } finally {
+      goBtn.disabled = false;
+      aborter = null;
+      playing = false;
+    }
+  }
+
+  goBtn.addEventListener('click', runDebate);
+  stopBtn.addEventListener('click', () => {
+    if (aborter) aborter.abort();
+  });
+})();
+</script>
+</body>
+</html>
