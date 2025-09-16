@@ -7,24 +7,14 @@
 <style>
   :root{
     --bg:#0e0f13; --tile:#151821; --text:#e5e7ee; --muted:#9aa3b2;
-    --lav:#a78bfa; --lav-ghost:#a78bfa26; /* listening */
-    --speak:#22c55e;  /* speaking */
-    --think:#facc15;  /* thinking */
-    --err:#ef4444;
+    --lav:#a78bfa; --lav-ghost:#a78bfa26; --speak:#22c55e; --think:#facc15; --err:#ef4444;
   }
-  html,body{height:100%}
-  body{
-    margin:0;background:var(--bg);color:var(--text);
-    display:flex;align-items:center;justify-content:center;
-    font-family:ui-sans-serif,system-ui,-apple-system,"Inter",Segoe UI,Roboto,Arial;
-    -webkit-user-select:none;user-select:none;touch-action:manipulation
-  }
-  .mic{
-    width:180px;height:180px;border-radius:24px;border:none;background:#1f2330;
-    box-shadow:0 10px 40px #0006, inset 0 -2px 0 #000a;
-    display:flex;align-items:center;justify-content:center;
-    cursor:pointer;transition:transform .06s ease, background .15s ease, box-shadow .15s ease
-  }
+  html,body{height:100%} body{margin:0;background:var(--bg);color:var(--text);
+    display:flex;align-items:center;justify-content:center;font-family:ui-sans-serif,system-ui,-apple-system,"Inter",Segoe UI,Roboto,Arial;
+    -webkit-user-select:none;user-select:none;touch-action:manipulation}
+  .mic{width:180px;height:180px;border-radius:24px;border:none;background:#1f2330;
+    box-shadow:0 10px 40px #0006, inset 0 -2px 0 #000a;display:flex;align-items:center;justify-content:center;cursor:pointer;
+    transition:transform .06s ease, background .15s ease, box-shadow .15s ease}
   .mic svg{width:42px;height:42px;fill:#e8ebf5;opacity:.95}
   .mic:active{transform:scale(.985)}
   .idle{background:#1f2330}
@@ -45,13 +35,10 @@
 </head>
 <body>
 
-<!-- GATE -->
 <div id="gate" class="gate" style="display:none">
   <div class="card">
     <div style="font-weight:600">Join your team on Nora</div>
-    <div style="color:#9aa3b2;font-size:14px;margin-top:6px">
-      Enter the 8-digit team code (####-####) you received after subscribing.
-    </div>
+    <div style="color:#9aa3b2;font-size:14px;margin-top:6px">Enter the 8-digit team code (####-####) you received after subscribing.</div>
     <div class="row">
       <input id="teamCode" class="in" placeholder="1234-5678" inputmode="numeric" maxlength="9">
       <button id="enterBtn" class="btn">Enter</button>
@@ -63,12 +50,10 @@
   </div>
 </div>
 
-<!-- MIC -->
 <button id="mic" class="mic idle" aria-label="Toggle Nora">
   <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c1.66 0 3 1.34 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/></svg>
 </button>
 
-<!-- Upload (kept) -->
 <div id="uploadFab" class="fab" title="Upload PDFs">
   <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
 </div>
@@ -86,48 +71,47 @@
 
   const API_VOICE='/.netlify/functions/voice';
   const API_UPLOAD='/.netlify/functions/upload';
-
   const LS_CODE='nora_team_code';
   const LS_ROLE='nora_role';
   const LS_INTRO_PREFIX='nora_intro_done_';
 
   const speaker=new Audio(); speaker.preload='none'; speaker.playsInline=true;
   let audioCtx, primed=false, isOn=false, isSpeaking=false, inflight=null;
-  let media=null, rec=null, chunks=[];
+  let media=null, rec=null, chunks=[]; let micPrimed=false;
 
-  function toast(m){
-    const t=document.createElement('div'); t.className='toast'; t.textContent=m;
-    document.body.appendChild(t); setTimeout(()=>{try{t.remove();}catch{}},3000);
-  }
+  function toast(m){ const t=document.createElement('div'); t.className='toast'; t.textContent=m; document.body.appendChild(t); setTimeout(()=>{try{t.remove();}catch{}},3000); }
   function setState(s){ mic.className='mic '+s; }
 
-  // ---- Gate ----
+  // Gate
   function normCode(s){ const t=String(s||'').replace(/[^0-9]/g,'').slice(0,8); return t.length===8? t.slice(0,4)+'-'+t.slice(4):''; }
   function showGate(){ gate.style.display='flex'; codeIn.value=localStorage.getItem(LS_CODE)||''; }
   function hideGate(){ gate.style.display='none'; }
-
   if(!localStorage.getItem(LS_CODE)) showGate();
-
-  enterBtn.onclick=()=>{ const c=normCode(codeIn.value)||codeIn.value.trim();
-    if(!/^\d{4}-\d{4}$/.test(c)){ toast('Enter a code like 1234-5678'); return; }
-    localStorage.setItem(LS_CODE,c); hideGate(); localStorage.removeItem(LS_ROLE);
-  };
+  enterBtn.onclick=()=>{ const c=normCode(codeIn.value)||codeIn.value.trim(); if(!/^\d{4}-\d{4}$/.test(c)){ toast('Enter a code like 1234-5678'); return; } localStorage.setItem(LS_CODE,c); hideGate(); localStorage.removeItem(LS_ROLE); };
   buyBtn.onclick=()=>{ window.location.href='https://buy.stripe.com/test_1234567890'; };
 
-  // ---- Audio boot ----
+  // Audio boot + mic permission prompt
   async function ensureAudio(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state!=='running') await audioCtx.resume(); }
-  async function primeAudioOnce(){
-    if(primed) return; try{
+  async function primeAudioOnce(){ if(primed) return; try{
       await ensureAudio();
       const b=audioCtx.createBuffer(1,1,audioCtx.sampleRate);
       const s=audioCtx.createBufferSource(); s.buffer=b; s.connect(audioCtx.destination); s.start(0);
       speaker.src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
       await speaker.play().catch(()=>{}); speaker.pause(); speaker.currentTime=0;
       primed=true;
-    }catch{}
+  }catch{} }
+  async function promptMicOnce(){
+    if(micPrimed) return;
+    try{
+      const test=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+      test.getTracks().forEach(t=>t.stop());
+      micPrimed=true;
+    }catch(e){
+      toast('Microphone permission is required'); throw e;
+    }
   }
 
-  // ---- Playback (HTMLAudio only; no WebAudio decode = no double play) ----
+  // Playback (single path)
   async function playAudio(dataUrl){
     isSpeaking=true; setState('speaking');
     try{
@@ -141,12 +125,8 @@
   function abortInFlight(){ try{ inflight?.abort(); }catch{} inflight=null; }
   function stopRecorder(){ try{rec?.stop();}catch{} try{media?.getTracks().forEach(t=>t.stop());}catch{} rec=null; media=null; }
 
-  // ---- Recorder helpers ----
-  function pickMime(){
-    const M=window.MediaRecorder; if(!M||!M.isTypeSupported) return "";
-    const pref=["audio/mp4;codecs=mp4a.40.2","audio/m4a","audio/webm;codecs=opus","audio/webm","audio/mpeg","audio/wav"];
-    for(const m of pref) if(M.isTypeSupported(m)) return m; return "";
-  }
+  // Recorder
+  function pickMime(){ const M=window.MediaRecorder; if(!M||!M.isTypeSupported) return ""; const pref=["audio/mp4;codecs=mp4a.40.2","audio/m4a","audio/webm;codecs=opus","audio/webm","audio/mpeg","audio/wav"]; for(const m of pref) if(M.isTypeSupported(m)) return m; return ""; }
   async function startRecorder(){
     const mime=pickMime();
     media=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
@@ -160,20 +140,21 @@
       const iv=setInterval(()=>{
         const now=performance.now();
         if(chunks.length){ heard=true; last=now; }
-        if(heard && now-last>900){ clearInterval(iv); try{r.stop();}catch{} setTimeout(()=>{
-          const b=new Blob(chunks,{type:r.mimeType||'audio/webm'}); chunks=[]; resolve(b.size>1500?b:null);
-        },120); }
+        if(heard && now-last>900){
+          clearInterval(iv); try{r.stop();}catch{} setTimeout(()=>{
+            const b=new Blob(chunks,{type:r.mimeType||'audio/webm'}); chunks=[]; resolve(b.size>1500?b:null);
+          },120);
+        }
         if(now-start>12000){ clearInterval(iv); try{r.stop();}catch{} resolve(null); }
       },120);
     });
   }
   async function blobToB64(b){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onloadend=()=>res(String(fr.result).split(',')[1]); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(b); }); }
 
-  // ---- Continuous listen loop (strict half-duplex) ----
   async function listenLoop(){
     while(isOn){
       try{
-        if(isSpeaking) { await new Promise(r=>setTimeout(r,60)); continue; } // never listen while speaking
+        if(isSpeaking) { await new Promise(r=>setTimeout(r,60)); continue; }
         await ensureAudio();
         const r=await startRecorder();
         const heard=await waitUtterance(r);
@@ -198,7 +179,7 @@
         if(data.control?.requireCode){ isOn=false; setState('idle'); showGate(); toast('Enter your team code'); return; }
         if(data.control?.role){ localStorage.setItem(LS_ROLE, data.control.role); }
 
-        if(data.audio) { await playAudio(data.audio); } // play fully before looping
+        if(data.audio){ await playAudio(data.audio); }
         else if(data.error){ toast(data.error); setState(isOn?'listening':'idle'); }
         else setState(isOn?'listening':'idle');
 
@@ -209,37 +190,40 @@
     }
   }
 
-  // ---- Mic toggle ----
+  // Mic toggle
   let tapLock=false;
   mic.addEventListener('click', async ()=>{
     if(tapLock) return; tapLock=true; setTimeout(()=>tapLock=false,180);
 
-    if(isSpeaking){ speaker.pause(); return; } // tap interrupts speech
+    if(isSpeaking){ speaker.pause(); return; } // interrupt speech
 
     if(!localStorage.getItem(LS_CODE)){ showGate(); return; }
 
     if(!isOn){
-      // turn ON
-      isOn=true; setState('listening'); await primeAudioOnce();
+      // ON: request audio + mic permission FIRST, then intro, then listen
+      isOn=true;
+      await primeAudioOnce();
+      await promptMicOnce();              // <-- prompts permission on first tap
+      setState('speaking');               // immediate feedback
 
-      // FIRST-RUN INTRO (plays once per team code) BEFORE listening
-      const code=localStorage.getItem(LS_CODE); const introKey=LS_INTRO_PREFIX+code;
+      const code=localStorage.getItem(LS_CODE);
+      const introKey=LS_INTRO_PREFIX+code;
       if(!localStorage.getItem(introKey)){
         try{
-          setState('speaking');
           const r=await fetch(API_VOICE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,intro:true})});
           const j=await r.json(); if(j.audio) await playAudio(j.audio);
           localStorage.setItem(introKey,'1');
-        }catch(e){ if(!(e&&e.name==='AbortError')) toast('intro failed'); setState('listening'); }
+        }catch(e){ if(!(e&&e.name==='AbortError')) toast('intro failed'); }
       }
+      setState('listening');
       listenLoop();
     } else {
-      // turn OFF
+      // OFF
       isOn=false; abortInFlight(); stopRecorder(); setState('idle');
     }
   });
 
-  // ---- Uploads (kept; button color is the theme tile) ----
+  // Uploads
   uploadFab.onclick = ()=> fileInput.click();
   fileInput.onchange = async ()=>{
     const files=[...(fileInput.files||[])].filter(f=>/pdf$/i.test(f.type));
@@ -253,7 +237,6 @@
     fileInput.value='';
   };
 
-  // surface errors instead of white screen
   window.addEventListener('error', e=> toast(e.message||'error'));
   window.addEventListener('unhandledrejection', e=> { const m=String(e.reason||''); if(!/AbortError/i.test(m)) toast(m); });
 })();
