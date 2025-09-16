@@ -3,43 +3,32 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Nora — Team code</title>
+<title>Nora — Finishing up…</title>
 <style>
-  body{margin:0;background:#0f1115;color:#e9eef6;font-family:-apple-system,BlinkMacSystemFont,Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
-  .card{background:#141821;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:24px;max-width:560px;width:92%}
-  h1{margin:0 0 6px 0;font-size:20px}
-  .code{margin-top:10px;font-size:28px;font-weight:700;letter-spacing:2px;background:#0e1219;border-radius:12px;padding:14px 16px;text-align:center}
-  .row{display:flex;gap:10px;margin-top:12px}
-  .btn{background:#1b5fff;color:#fff;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer}
-  .btn:active{transform:scale(.98)}
-  .fine{opacity:.8;font-size:13px;margin-top:10px}
+  body{margin:0;background:#0f1115;color:#e9eef6;font-family:-apple-system,BlinkMacSystemFont,Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;
+       display:flex;align-items:center;justify-content:center;min-height:100vh}
+  .card{background:#141821;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:24px;max-width:560px;width:92%;
+        box-shadow:0 18px 55px rgba(0,0,0,.45)}
+  .s{opacity:.85}
 </style>
 </head>
 <body>
   <div class="card">
-    <h1>You're all set ✅</h1>
-    <div>Share this team code with your employees. They’ll enter it on the first screen to join your Nora.</div>
-    <div class="code" id="code">Generating…</div>
-    <div class="row">
-      <button class="btn" id="copy">Copy code</button>
-      <button class="btn" id="home">Open Nora</button>
-    </div>
-    <div class="fine">Lost this page? You can always subscribe again to generate a new team.</div>
+    <div>Creating your team…</div>
+    <div class="s" id="msg" style="margin-top:8px">This will only take a second.</div>
   </div>
 
 <script>
 (async function(){
   try{
-    const r = await fetch('/.netlify/functions/provision');
+    const r = await fetch('/.netlify/functions/provision', { method:'GET' });
     const j = await r.json();
-    const code = j.code || '0000-0000';
-    document.getElementById('code').textContent = code;
-    document.getElementById('copy').onclick = async () => {
-      try{ await navigator.clipboard.writeText(code); document.getElementById('copy').textContent='Copied'; }catch(e){}
-    };
-    document.getElementById('home').onclick = () => { window.location.href = '/'; };
+    const code = j.code || '';
+    if (!/^[0-9]{4}-[0-9]{4}$/.test(code)) throw new Error('Bad code');
+    // redirect back to home with the code so the home page can show a popup
+    location.replace('/?code=' + encodeURIComponent(code));
   }catch(e){
-    document.getElementById('code').textContent = 'Error creating code';
+    document.getElementById('msg').textContent = 'Sorry, something went wrong generating your code.';
   }
 })();
 </script>
