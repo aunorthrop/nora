@@ -1,8 +1,85 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Payment successful</title>
-<style>body{font-family:system-ui,-apple-system,Segoe UI,Inter,Roboto,Arial,sans-serif;padding:40px;background:#111;color:#eee}a{color:#8ab4ff}</style>
-</head><body>
-  <h1>Thanks — your subscription is active.</h1>
-  <p>Open Nora and set your team code (any string you share with your team), then tell teammates to enter the same code on their device.</p>
-  <p><a href="/">Back to Nora</a></p>
-</body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Subscription successful — Your team code</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:system-ui,-apple-system,Inter,Segoe UI,Roboto,Arial,sans-serif;background:#0f1115;color:#e9eef6;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:32px}
+  .card{background:#141821;border:1px solid rgba(255,255,255,.07);border-radius:16px;max-width:640px;width:100%;padding:22px;box-shadow:0 18px 55px rgba(0,0,0,.45)}
+  h1{font-size:20px;margin-bottom:8px}
+  p{opacity:.85;margin:8px 0 14px;font-size:14px;line-height:1.4}
+  .code{font-variant-numeric:tabular-nums;background:#0e1219;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:14px 16px;font-size:18px;letter-spacing:.6px;display:flex;align-items:center;justify-content:space-between;margin-top:8px}
+  .btn{background:#1b5fff;color:#fff;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+  .btn.secondary{background:#242936;color:#e9eef6}
+  .btn:active{transform:scale(.98)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  .note{opacity:.75;font-size:12px;margin-top:8px}
+  .ok{color:#13c26b;font-size:12px;margin-left:8px}
+  .copy-wrap{display:flex;align-items:center;gap:8px}
+  input[type=text]{flex:1;background:#0e1219;border:1px solid rgba(255,255,255,.08);border-radius:10px;color:#e9eef6;padding:10px 12px;font-size:14px}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Thanks — your subscription is active.</h1>
+    <p>Here’s your unique team code. Share it with your team; they’ll enter it on their device to link to your Nora space.</p>
+
+    <div class="code">
+      <span id="teamCodeText">GENERATING…</span>
+      <span class="copy-wrap">
+        <button class="btn secondary" id="copyBtn">Copy</button>
+        <span id="copyOk" class="ok" style="display:none">Copied</span>
+      </span>
+    </div>
+
+    <div class="row">
+      <button class="btn" id="setHereBtn">Set on this device</button>
+      <a class="btn secondary" href="/" id="openApp">Open Nora</a>
+    </div>
+
+    <p class="note">Tip: you can always change devices later—on the mic screen, long-press the mic (~1.2s) to re-enter a team code.</p>
+  </div>
+
+<script>
+(function(){
+  const STORAGE_KEY = 'nora_business_code';
+  const SESSION_GEN  = 'nora_new_code';
+
+  function makeCode(){
+    // High-entropy, human-readable: NORA-XXXX-YYYY
+    const seg = n => Array.from(crypto.getRandomValues(new Uint8Array(n)))
+                    .map(b => "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"[b % 32]).join('');
+    return `NORA-${seg(4)}-${seg(4)}`;
+  }
+
+  function getOrCreateSessionCode(){
+    let code = sessionStorage.getItem(SESSION_GEN);
+    if (!code) {
+      code = makeCode();
+      sessionStorage.setItem(SESSION_GEN, code);
+    }
+    return code;
+  }
+
+  const code = getOrCreateSessionCode();
+  const codeEl = document.getElementById('teamCodeText');
+  codeEl.textContent = code;
+
+  document.getElementById('copyBtn').onclick = async () => {
+    try{
+      await navigator.clipboard.writeText(code);
+      document.getElementById('copyOk').style.display = 'inline';
+      setTimeout(()=> document.getElementById('copyOk').style.display='none', 1500);
+    }catch{}
+  };
+
+  document.getElementById('setHereBtn').onclick = () => {
+    try { localStorage.setItem(STORAGE_KEY, code); } catch {}
+    window.location.href = '/';
+  };
+})();
+</script>
+</body>
+</html>
