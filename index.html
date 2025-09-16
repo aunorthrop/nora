@@ -28,6 +28,45 @@
   .voice-button.speaking{background:#18c964;color:#0b0c10}
   .voice-button.error{background:#ff3b30;color:#fff}
   .mic-icon{width:44px;height:44px;fill:currentColor}
+
+  /* Upload button (top-right) */
+  .upload-btn{
+    position:fixed;top:20px;right:20px;
+    width:44px;height:44px;border:none;border-radius:12px;
+    background:#131722;border:1px solid #1d2433;color:#e8e9ed;
+    box-shadow:0 6px 22px rgba(0,0,0,.35), inset 0 -3px 0 rgba(255,255,255,.04);
+    display:grid;place-items:center;cursor:pointer;
+    transition:transform .06s ease, background .15s ease, color .15s ease;
+  }
+  .upload-btn:active{transform:scale(.98)}
+
+  /* Popover */
+  .popover{
+    position:fixed;top:72px;right:20px;min-width:260px;
+    background:#121620;border:1px solid #1c2231;border-radius:16px;
+    color:#e8e9ed;box-shadow:0 14px 40px rgba(0,0,0,.45);
+    transform-origin: top right; transform: scale(.98) translateY(-6px);
+    opacity:0; pointer-events:none; transition: all .16s ease;
+  }
+  .popover.open{ opacity:1; pointer-events:auto; transform: scale(1) translateY(0); }
+  .pop-inner{ padding:14px; }
+  .pop-title{ font-size:14px; opacity:.85; margin-bottom:10px; }
+  .file-row{ display:flex; align-items:center; gap:10px; }
+  .file-row input[type=file]{ flex:1; color:#cfd2da; }
+  .help{ font-size:12px; opacity:.65; margin-top:8px; }
+  .divider{ height:1px; background:#1c2231; margin:12px 0; }
+  .row{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .small-btn{
+    border:none;border-radius:10px;background:#0b5cff;color:#fff;padding:8px 12px;cursor:pointer;
+  }
+  .tag{ font-size:11px; opacity:.7; }
+
+  .toast{
+    position:fixed;left:50%;bottom:24px;transform:translateX(-50%);
+    background:#121620;color:#e8e9ed;border:1px solid #1c2231;border-radius:12px;
+    padding:10px 12px; font-size:13px; opacity:0; pointer-events:none; transition:opacity .18s ease;
+  }
+  .toast.show{ opacity:1; pointer-events:auto; }
 </style>
 </head>
 <body>
@@ -36,21 +75,53 @@
       <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c1.66 0 3-1.34 3-3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/>
     </svg>
   </button>
+
+  <!-- Upload -->
+  <button id="uploadBtn" class="upload-btn" aria-label="Upload PDF for static info">
+    <!-- Plus icon -->
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11 11V5h2v6h6v2h-6v6h-2v-6H5v-2z"/></svg>
+  </button>
+  <div id="uploadPop" class="popover">
+    <div class="pop-inner">
+      <div class="pop-title">Add static info (PDF only)</div>
+      <div class="file-row">
+        <input id="pdfInput" type="file" accept="application/pdf"/>
+        <button id="pdfSend" class="small-btn">Upload</button>
+      </div>
+      <div class="help">Max 10 MB • Admin mode required</div>
+      <div class="divider"></div>
+      <div class="row">
+        <span class="tag">Tip: say “activate admin mode” first.</span>
+        <button id="pdfClose" class="small-btn" style="background:#2a2f3f">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast">Uploading…</div>
+
   <input id="bizId" type="hidden" value="nora"/>
+
 <script>
 (() => {
   const voiceBtn = document.getElementById('voiceBtn');
+  const uploadBtn = document.getElementById('uploadBtn');
+  const uploadPop = document.getElementById('uploadPop');
+  const pdfInput  = document.getElementById('pdfInput');
+  const pdfSend   = document.getElementById('pdfSend');
+  const pdfClose  = document.getElementById('pdfClose');
+  const toast     = document.getElementById('toast');
   const BIZ_ID = (document.getElementById('bizId').value || 'nora');
 
+  // ---- local session/memory
   const LOCAL_KEY = `nora_voice_memory_${BIZ_ID}`;
-  function loadLocal(){ try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || '{"items":[],"conversations":[],"voice":"alloy","pace":0.95,"boot":false}'); } catch { return { items:[], conversations:[], voice:"alloy", pace:0.95, boot:false }; } }
+  function loadLocal(){ try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || '{"items":[],"conversations":[],"pace":0.98,"boot":false,"adminPass":null}'); } catch { return { items:[], conversations:[], pace:0.98, boot:false, adminPass:null }; } }
   function saveLocal(m){ try { localStorage.setItem(LOCAL_KEY, JSON.stringify(m)); } catch(e){} }
   let memoryShadow = loadLocal();
   if (!memoryShadow.conversations) memoryShadow.conversations = [];
-  memoryShadow.voice = memoryShadow.voice || "alloy";
-  memoryShadow.pace  = typeof memoryShadow.pace === "number" ? memoryShadow.pace : 0.95;
+  memoryShadow.pace  = typeof memoryShadow.pace === "number" ? memoryShadow.pace : 0.98;
   saveLocal(memoryShadow);
 
+  // ---- audio state
   let isSession=false,isListening=false,isProcessing=false,isSpeaking=false,hasBoot=false,uiLock=false;
   let sessionId=null,inflightController=null;
   let audioCtx,micStream,micRecorder,chunks=[],audioProcessor,source,maxRecordTimer;
@@ -58,6 +129,7 @@
   const speaker=new Audio(); speaker.preload="none"; speaker.playsInline=true; speaker.volume=1.0;
   let speakTimeout=null;
 
+  // ---- UI helpers
   function setBtnState(cls){
     voiceBtn.className = `voice-button ${cls}`;
     voiceBtn.setAttribute('aria-label', {
@@ -66,7 +138,9 @@
       error:"Error — tap to retry"
     }[cls] || "Press to talk");
   }
+  function showToast(msg, ms=1400){ toast.textContent = msg; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'), ms); }
 
+  // ---- Boot
   async function bootOnce(){
     if (hasBoot) return true;
     try{
@@ -110,6 +184,7 @@
   function cleanupAudioProcessing(){ clearTimeout(maxRecordTimer); try{audioProcessor?.disconnect();}catch{} audioProcessor=null; try{source?.disconnect();}catch{} source=null; }
   function cleanupMicrophone(){ cleanupAudioProcessing(); try{ micStream?.getTracks().forEach(t=>t.stop()); }catch{} micStream=null; }
 
+  // ---- Listen loop
   async function startListening(){
     if(isListening||isProcessing) return;
     try{
@@ -159,7 +234,7 @@
       if(!resp.ok){ setBtnState('error'); isProcessing=false; return; }
       const data=await resp.json();
       if(data.sessionId) sessionId=data.sessionId;
-      if(data.memoryShadow){ memoryShadow=data.memoryShadow; saveLocal(memoryShadow); }
+      if(data.memoryShadow){ memoryShadow={...memoryShadow, ...data.memoryShadow}; saveLocal(memoryShadow); }
       const maxSpeakMs=Number(data.maxSpeakMs||6500);
       if(data.audio){ await playResponse(data.audio,maxSpeakMs); }
       else if(data.clientTTS && data.sayText){ await speakLocal(data.sayText,data.tone||"neutral",maxSpeakMs); }
@@ -194,7 +269,7 @@
     if(tone==="cheerful"){ u.rate=1.03; u.pitch=1.05; }
     else if(tone==="empathetic"){ u.rate=0.95; u.pitch=0.98; }
     else if(tone==="serious"){ u.rate=0.92; u.pitch=0.95; }
-    else { u.rate=1.0; u.pitch=1.0; }
+    else { u.rate=1.02; u.pitch=1.05; }
     speakTimeout=setTimeout(()=>{ window.speechSynthesis.cancel(); isSpeaking=false; setBtnState('idle'); }, maxSpeakMs);
     window.speechSynthesis.speak(u);
     u.onend=()=>{ if(speakTimeout){ clearTimeout(speakTimeout); speakTimeout=null; } isSpeaking=false; setBtnState('idle'); };
@@ -213,7 +288,7 @@
       const r = await fetch('/.netlify/functions/brief',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ businessId:BIZ_ID }) });
       if(r.ok){
         const j = await r.json();
-        const maxSpeakMs = Number(j.maxSpeakMs||6500);
+        const maxSpeakMs = Number(j.maxSpeakMs||8000);
         if(j.audio){ await playResponse(j.audio, maxSpeakMs); }
         else if(j.clientTTS && j.sayText){ await speakLocal(j.sayText, j.tone||"neutral", maxSpeakMs); }
       }
@@ -230,6 +305,26 @@
     }catch(err){ setBtnState('error'); setTimeout(()=>{ if(!isSession) setBtnState('idle'); }, 900); }
     finally{ setTimeout(()=>uiLock=false, 250); }
   }
+
+  // Upload UI
+  uploadBtn.addEventListener('click', ()=> uploadPop.classList.toggle('open'));
+  pdfClose.addEventListener('click', ()=> uploadPop.classList.remove('open'));
+  pdfSend.addEventListener('click', async ()=>{
+    const f = pdfInput.files?.[0];
+    if(!f){ showToast("Choose a PDF first", 1200); return; }
+    if(f.type !== 'application/pdf'){ showToast("PDFs only", 1200); return; }
+    if(f.size > 10*1024*1024){ showToast("Max 10 MB", 1400); return; }
+
+    const b64 = await new Promise((res,rej)=>{ const r=new FileReader(); r.onloadend=()=>res(String(r.result).split(",")[1]||""); r.onerror=()=>rej(r.error||new Error("readAsDataURL failed")); r.readAsDataURL(f); });
+    showToast("Uploading…", 1600);
+    const resp = await fetch('/.netlify/functions/upload', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ businessId:BIZ_ID, sessionId, filename:f.name, size:f.size, contentType:f.type, dataB64:b64 })
+    });
+    const j = await resp.json().catch(()=>({error:"Bad response"}));
+    if(resp.ok){ showToast("Saved to static info", 1400); pdfInput.value=""; uploadPop.classList.remove('open'); }
+    else { showToast(j.error||"Upload failed", 1800); }
+  });
 
   voiceBtn.addEventListener('click', handleToggle, { passive:false });
   voiceBtn.addEventListener('click', ()=>{ if(isSpeaking && isSession){ stopSpeaker(); } }, { passive:true });
