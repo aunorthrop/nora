@@ -5,57 +5,66 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Nora — voice-first team updates</title>
 <style>
-  html,body{height:100%;margin:0;background:#0f1115;color:#e6e6e6;font-family:system-ui, -apple-system, Segoe UI, Inter, Roboto, sans-serif}
+  html,body{height:100%;margin:0;background:#0f1115;color:#e6e6e6;font-family:system-ui,-apple-system,Segoe UI,Inter,Roboto,sans-serif}
   .wrap{height:100%;display:flex;align-items:center;justify-content:center;position:relative}
-  .btn{width:160px;height:160px;border-radius:28px;border:none;background:#ff4d4d;color:#111;
-       box-shadow:0 8px 28px rgba(0,0,0,.35);font-size:18px;cursor:pointer;transition:transform .06s ease}
+
+  /* Mic button (lavender) + states */
+  .btn{width:160px;height:160px;border-radius:28px;border:none;background:#a78bfa;color:#111;
+       box-shadow:0 8px 28px rgba(0,0,0,.35);cursor:pointer;transition:transform .06s ease, background .15s ease}
   .btn:active{transform:scale(.98)}
-  .btn.blue{background:#2f7bfd;color:#fff}
-  .btn.yellow{background:#ffc61a;color:#111}
-  .gate{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(15,17,21,.92);
-        display:flex;align-items:center;justify-content:center}
+  .btn.listening{background:#6ea8fe;color:#fff}  /* blue while listening */
+  .btn.thinking{background:#ffd166;color:#111}   /* yellow while thinking */
+  .btn.speaking{background:#34d399;color:#102a1f}/* green while speaking */
+  .btn.off{background:#374151;color:#cbd5e1}     /* off/disabled */
+
+  /* Team code gate */
+  .gate{position:absolute;inset:0;background:rgba(15,17,21,.92);display:flex;align-items:center;justify-content:center}
   .card{background:#181b22;border:1px solid #2a2f3a;border-radius:14px;padding:20px;width:min(92vw,520px)}
   .h{font-weight:600;margin-bottom:8px}
   .row{display:flex;gap:8px;margin-top:10px}
   .inp{flex:1;background:#0f1115;border:1px solid #2a2f3a;border-radius:10px;color:#e6e6e6;height:42px;padding:0 12px}
-  .act{background:#3771ff;color:#fff;border:none;border-radius:10px;padding:0 14px;height:42px;cursor:pointer}
-  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:#cc3333;color:#fff;
-         padding:10px 14px;border-radius:10px;font-size:13px;display:none}
+  .act{background:#00b894;color:#0d1b1e;border:none;border-radius:10px;padding:0 14px;height:42px;cursor:pointer}
+
+  /* Uploads popover (top-right) */
   .plus{position:fixed;right:16px;top:16px;width:44px;height:44px;border-radius:10px;background:#2a2f3a;
         color:#e6e6e6;border:none;font-size:26px;cursor:pointer}
   .files{position:fixed;right:16px;top:70px;background:#181b22;border:1px solid #2a2f3a;border-radius:12px;
          padding:10px 12px;display:none;width:320px}
   .files h4{margin:6px 0 10px 0}
   .files .u{display:flex;gap:8px;align-items:center}
-  .files .u input[type=file]{display:block;background:#0f1115;color:#e6e6e6;border:1px solid #2a2f3a;border-radius:8px;padding:8px}
+  /* Light gray upload button */
+  .files .u input[type=file]{display:block;background:#e5e7eb;color:#111;border:1px solid #9ca3af;border-radius:8px;padding:8px}
   .list{margin-top:10px;font-size:13px;color:#bfc6d1;max-height:180px;overflow:auto}
-  .ok{background:#16a34a}
+
+  /* Toast */
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:#8b5cf6;color:#fff;
+         padding:10px 14px;border-radius:10px;font-size:13px;display:none}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <button id="mic" class="btn"> </button>
+  <button id="mic" class="btn off" aria-label="Nora"></button>
 
-  <!-- Team code gate -->
+  <!-- Team gate -->
   <div id="gate" class="gate" style="display:none">
     <div class="card">
       <div class="h">Join your team on Nora</div>
       <div style="font-size:14px;color:#bfc6d1">Enter the 8-digit team code (####-####). Or subscribe to create a new team.</div>
       <div class="row">
-        <input id="code" class="inp" placeholder="1234-5678" maxlength="9" />
+        <input id="code" class="inp" placeholder="1234-5678" maxlength="9"/>
         <button id="enter" class="act">Enter</button>
       </div>
       <div class="row">
-        <button id="buy" class="act" style="background:#00b894">Subscribe — $10/mo</button>
+        <button id="buy" class="act" style="background:#3771ff;color:#fff">Subscribe — $10/mo</button>
       </div>
     </div>
   </div>
 
-  <!-- uploads (optional) -->
+  <!-- Uploads -->
   <button id="plus" class="plus">+</button>
   <div id="files" class="files">
     <h4>Files</h4>
-    <div class="u"><input id="file" type="file" accept="application/pdf" /></div>
+    <div class="u"><input id="file" type="file" accept="application/pdf"/></div>
     <div id="flist" class="list">No files uploaded yet.</div>
   </div>
 
@@ -69,14 +78,14 @@
   const code = document.getElementById('code');
   const enter= document.getElementById('enter');
   const buy  = document.getElementById('buy');
-  const toast= document.getElementById('toast');
   const plus = document.getElementById('plus');
   const files= document.getElementById('files');
   const fileI= document.getElementById('file');
   const flist= document.getElementById('flist');
+  const toast= document.getElementById('toast');
 
-  const API = p => fetch(p, { headers:{}, method:'GET' });
-  const post = (u,b) => fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+  const API = p => fetch(p, { method:'GET' });
+  const POST= (u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
 
   const LS = {
     team:   () => localStorage.getItem('nora_team') || '',
@@ -88,124 +97,139 @@
   };
 
   // --- gate ---
-  function showGate(){ gate.style.display='flex'; }
-  function hideGate(){ gate.style.display='none'; }
-  function fmt(v){ return (v||'').replace(/[^\d]/g,'').replace(/(\d{4})(\d{0,4}).*/,'$1-$2').toUpperCase(); }
-
-  if(!LS.team()){ showGate(); } else { hideGate(); }
-
-  code.addEventListener('input', e => { e.target.value = fmt(e.target.value); });
+  function fmt(v){ return (v||'').replace(/[^\d]/g,'').replace(/(\d{4})(\d{0,4}).*/,'$1-$2'); }
+  function showGate(){ gate.style.display='flex'; mic.classList.add('off'); }
+  function hideGate(){ gate.style.display='none'; mic.classList.remove('off'); }
+  if(!LS.team()) showGate(); else hideGate();
+  code.addEventListener('input', e=> e.target.value = fmt(e.target.value));
   enter.addEventListener('click', ()=>{
     const v = fmt(code.value);
-    if(!/^\d{4}-\d{4}$/.test(v)){ return err('Enter a code like 1234-5678'); }
+    if(!/^\d{4}-\d{4}$/.test(v)) return err('Enter a code like 1234-5678');
     LS.setTeam(v); hideGate();
   });
   buy.addEventListener('click', ()=>{ window.location.href = '/subscribe'; });
 
-  // uploads
-  plus.addEventListener('click', ()=>{ files.style.display = files.style.display==='none'?'block':'none'; });
+  // Uploads
+  plus.addEventListener('click', ()=> files.style.display = files.style.display==='none'?'block':'none');
   fileI.addEventListener('change', async ()=>{
     const t = LS.team(); if(!t) return err('Enter your team code first.');
     const f = fileI.files[0]; if(!f) return;
-    const text = await pdfToText(f).catch(()=>null);
-    if(!text) return err('Failed to read PDF.');
-    const res = await post('/.netlify/functions/files',{businessId:t,name:f.name,size:f.size,text});
-    const j = await res.json();
-    if(!res.ok||j.error) return err('Upload failed');
-    ok('Uploaded'); renderFiles();
+    const text = await pdfToText(f).catch(()=>null); if(!text) return err('Failed to read PDF.');
+    const r = await POST('/.netlify/functions/files',{businessId:t,name:f.name,size:f.size,text});
+    const j = await r.json(); if(!r.ok||j.error) return err('Upload failed'); ok('Uploaded'); renderFiles();
   });
   async function renderFiles(){
     const t = LS.team(); if(!t) return;
     const r = await API('/.netlify/functions/files?businessId='+encodeURIComponent(t));
-    const j = await r.json(); if(!r.ok||j.error) { flist.textContent='Error loading files.'; return; }
-    flist.innerHTML = (j.docs||[]).map(d=>`<div>${d.name}</div>`).join('') || 'No files uploaded yet.';
+    const j = await r.json(); flist.innerHTML = (j.docs||[]).map(d=>`<div>${d.name}</div>`).join('') || 'No files uploaded yet.';
   }
   renderFiles();
 
-  // --- audio core ---
-  let media, rec, chunks=[];
-  let speaking=false, awaitingRole=false;
-
-  async function firstRunIntro(){
-    const t = LS.team(); if(!t) return;
-    const r = await API('/.netlify/functions/brief?businessId='+encodeURIComponent(t)+'&first=1');
-    const j = await r.json();
-    if(j.audio) await play(j.audio);
-    awaitingRole = true; // next mic capture answers yes/no
-  }
-
-  async function quickWhatsNewThenListen(){
-    const t = LS.team(); if(!t) return;
-    const r = await API('/.netlify/functions/brief?businessId='+encodeURIComponent(t));
-    const j = await r.json();
-    if(j.audio) await play(j.audio);
-    await listenOnce({ role: LS.role()||'employee' });
-  }
+  // --- audio core (toggle session: on -> continuous; off -> stop) ---
+  let sessionOn=false, speaking=false, listening=false, inflight=null;
+  const a = new Audio(); a.preload="none"; a.playsInline=true;
 
   mic.addEventListener('click', async ()=>{
     if(!LS.team()){ showGate(); return; }
-    if(speaking){ stopPlay(); return; }
-
-    if(LS.first()){
-      await firstRunIntro();
-      await listenOnce({ expectRole:true });
-      return;
-    }
-
-    const role = LS.role() || 'employee';
-    if(role==='employee'){
-      await quickWhatsNewThenListen();
+    if(!sessionOn){
+      sessionOn = true;
+      cycleStart();             // begin continuous loop
     }else{
-      await listenOnce({ role:'admin' });
+      if(speaking){             // interrupt speech, keep ON
+        stopPlay();
+        // immediately resume listening if already on
+        if(!listening) cycleListen();
+      }else{
+        // toggle OFF
+        sessionOn = false;
+        stopPlay(); stopListen();
+        mic.className = 'btn';  // lavender idle
+      }
     }
   });
 
-  // one-shot record + send
-  async function listenOnce(extra){
-    let mime = preferredMime();
-    try{
-      media = await navigator.mediaDevices.getUserMedia({ audio:true });
-      rec = new MediaRecorder(media, mime?{mimeType:mime}:undefined);
-    }catch(e){ return err('Mic unavailable'); }
+  async function cycleStart(){
+    // state -> lavender idle, then brief intro or "what's new"
+    mic.className = 'btn';
+    if(LS.first()){
+      const r = await API('/.netlify/functions/brief?businessId='+encodeURIComponent(LS.team())+'&first=1');
+      const j = await r.json(); if(j.audio) await play(j.audio);
+      // capture yes/no for role
+      await cycleListen({ expectRole:true });
+    }else{
+      // quick "what's new" for employees; admins go straight to listen
+      const role = LS.role() || 'employee';
+      if(role==='employee'){
+        const r = await API('/.netlify/functions/brief?businessId='+encodeURIComponent(LS.team()));
+        const j = await r.json(); if(j.audio) await play(j.audio);
+      }
+      await cycleListen({ role: LS.role() || 'employee' });
+    }
+  }
 
-    chunks=[]; rec.ondataavailable=e=>{ if(e.data?.size>0) chunks.push(e.data); };
-    const p = new Promise(res=> rec.onstop = res);
-    rec.start(120);
-
-    // stop on 1.2s silence
-    const ctx = new (window.AudioContext||window.webkitAudioContext)();
-    const src = ctx.createMediaStreamSource(media);
-    const proc = ctx.createScriptProcessor(1024,1,1);
-    src.connect(proc); proc.connect(ctx.destination);
-    let last = performance.now();
-    proc.onaudioprocess = ev=>{
-      const d=ev.inputBuffer.getChannelData(0);
-      let s=0; for(let i=0;i<d.length;i++) s += Math.abs(d[i]);
-      if(s/d.length > 0.003) last = performance.now();
-      if(performance.now()-last > 1200){ try{ rec.stop(); }catch{} }
-    };
-
-    await p;
-    proc.disconnect(); src.disconnect(); media.getTracks().forEach(t=>t.stop());
-
-    const blob = new Blob(chunks,{ type: rec.mimeType||'audio/webm' });
+  async function cycleListen(extra){
+    if(!sessionOn) return;
+    const blob = await recordOnce().catch(()=>null);
+    if(!sessionOn || !blob) return;
     const b64 = await blobToB64(blob);
     const payload = {
       businessId: LS.team(),
-      audio: { data:b64, mime: blob.type, duration: 0 },
+      audio: { data:b64, mime: blob.type },
       ...(extra||{})
     };
-    const r = await post('/.netlify/functions/voice', payload);
-    const j = await r.json();
-    if(j.error){ return err(j.error); }
-    if(j.control?.role){ LS.setRole(j.control.role); LS.setFirstDone(); }
-    if(j.control?.askRoleAgain){ await listenOnce({ expectRole:true }); return; }
-    if(j.audio) await play(j.audio);
+    inflight?.abort?.(); inflight = new AbortController();
+    mic.className = 'btn thinking';
+    let resp; try{
+      const r = await fetch('/.netlify/functions/voice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal:inflight.signal});
+      resp = await r.json();
+    }catch(e){ err('Network error'); resp=null; }
+    if(!sessionOn) return;
+    if(resp?.error) { err(resp.error); mic.className='btn'; return; }
+    if(resp?.control?.role){ LS.setRole(resp.control.role); LS.setFirstDone(); }
+    if(resp?.control?.askRoleAgain){ await cycleListen({ expectRole:true }); return; }
+    if(resp?.audio) await play(resp.audio);
+    if(sessionOn) await cycleListen({ role: LS.role() || 'employee' }); // keep going
+  }
+
+  async function recordOnce(){
+    mic.className = 'btn listening';
+    let media, rec, chunks=[];
+    try{
+      media = await navigator.mediaDevices.getUserMedia({ audio:true });
+      const mime = preferredMime();
+      rec = new MediaRecorder(media, mime?{mimeType:mime}:undefined);
+    }catch(e){ err('Mic unavailable'); return null; }
+
+    return await new Promise((resolve)=>{
+      let stopped=false;
+      const finish=(blob)=>{ if(stopped) return; stopped=true; cleanup(); resolve(blob); };
+      const cleanup=()=>{ try{ proc.disconnect(); src.disconnect(); }catch{} try{ media.getTracks().forEach(t=>t.stop()); }catch{} listening=false; };
+      rec.ondataavailable = e=>{ if(e.data?.size>0) chunks.push(e.data); };
+      rec.onstop = ()=> finish(new Blob(chunks,{type: rec.mimeType||'audio/webm'}));
+      rec.start(100);
+      // silence detector
+      const ctx = new (window.AudioContext||window.webkitAudioContext)();
+      const src = ctx.createMediaStreamSource(media);
+      const proc= ctx.createScriptProcessor(1024,1,1);
+      src.connect(proc); proc.connect(ctx.destination);
+      listening=true;
+      let last=performance.now();
+      proc.onaudioprocess = ev=>{
+        if(!sessionOn){ try{ rec.stop(); }catch{} return; }
+        const d=ev.inputBuffer.getChannelData(0);
+        let s=0; for(let i=0;i<d.length;i++) s+=Math.abs(d[i]);
+        if(s/d.length > 0.003) last=performance.now();
+        const since = performance.now()-last;
+        if(since>1200){ try{ rec.stop(); }catch{} }   // auto-stop after pause
+      };
+      // hard timeout safety (12s)
+      setTimeout(()=>{ if(sessionOn) try{ rec.stop(); }catch{} }, 12000);
+    });
   }
 
   function preferredMime(){
-    const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    const Safari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent);
+    const iOS=/iPad|iPhone|iPod/.test(navigator.userAgent);
+    const Safari=/Safari/.test(navigator.userAgent)&&!/Chrome/.test(navigator.userAgent);
     if(iOS||Safari){
       if(MediaRecorder.isTypeSupported("audio/mp4;codecs=mp4a.40.2")) return "audio/mp4;codecs=mp4a.40.2";
       if(MediaRecorder.isTypeSupported("audio/mp4")) return "audio/mp4";
@@ -216,34 +240,26 @@
     return "";
   }
 
+  function stopListen(){ /* listener cleaned in recordOnce */ }
   async function blobToB64(b){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(",")[1]); r.onerror=()=>rej(r.error); r.readAsDataURL(b); }); }
 
-  // audio playback
-  const a = new Audio(); a.preload="none"; a.playsInline=true;
-  function stopPlay(){ try{ a.pause(); a.currentTime=0; speaking=false; mic.classList.remove('yellow'); }catch{} }
   async function play(url){
-    speaking=true; mic.classList.add('yellow');
+    speaking=true; mic.className='btn speaking';
     a.src=url; a.volume=1.0;
     try{ await a.play(); }catch(e){ err('play error'); }
-    await new Promise(res=> a.onended = ()=>{ speaking=false; mic.classList.remove('yellow'); res(); });
+    await new Promise(res=> a.onended = ()=>{ speaking=false; mic.className='btn'; res(); });
   }
+  function stopPlay(){ try{ a.pause(); a.currentTime=0; speaking=false; mic.className='btn listening'; }catch{} }
 
-  // toast
-  function err(s){ toast.textContent = String(s||'Error'); toast.style.display='block'; setTimeout(()=>toast.style.display='none',2800); }
-  function ok(s){ toast.textContent = String(s||'OK'); toast.style.background='#16a34a'; toast.style.display='block'; setTimeout(()=>{toast.style.display='none'; toast.style.background="#cc3333";},1600); }
+  function err(s){ toast.textContent=String(s||'Error'); toast.style.display='block'; setTimeout(()=>toast.style.display='none',2500); }
+  function ok(s){ toast.textContent=String(s||'OK'); toast.style.display='block'; setTimeout(()=>toast.style.display='none',1200); }
 
-  // naive PDF->text (lazy-loaded)
+  // PDF to text (lazy)
   async function pdfToText(file){
     const { getDocument } = await import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs');
-    const ab = await file.arrayBuffer();
-    const doc = await getDocument({ data: ab }).promise;
-    let out = "";
-    for(let p=1;p<=Math.min(doc.numPages,40);p++){
-      const page = await doc.getPage(p);
-      const txt = await page.getTextContent();
-      out += " " + txt.items.map(i=>i.str).join(" ");
-    }
-    return out.replace(/\s+/g,' ').trim().slice(0, 20000);
+    const ab = await file.arrayBuffer(); const doc = await getDocument({data:ab}).promise;
+    let out=""; for(let p=1;p<=Math.min(doc.numPages,40);p++){ const page=await doc.getPage(p); const txt=await page.getTextContent(); out+=" "+txt.items.map(i=>i.str).join(" "); }
+    return out.replace(/\s+/g,' ').trim().slice(0,20000);
   }
 })();
 </script>
