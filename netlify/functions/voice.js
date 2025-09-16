@@ -4,9 +4,10 @@ const OPENAI_ROOT = "https://api.openai.com/v1";
 const CHAT_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const STT_MODEL  = "whisper-1";
 const TTS_MODEL  = "tts-1";
-const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || "shimmer";
+const OPENAI_TTS_VOICE  = process.env.OPENAI_TTS_VOICE || "shimmer";
+const OPENAI_TTS_SPEED  = parseFloat(process.env.OPENAI_TTS_SPEED || "0.9"); // a little slower by default
 
-const UPDATES_TTL_HOURS  = Number(process.env.UPDATES_TTL_HOURS  || 168); // 7d
+const UPDATES_TTL_HOURS  = Number(process.env.UPDATES_TTL_HOURS  || 168);
 const BRIEF_WINDOW_HOURS = Number(process.env.BRIEF_WINDOW_HOURS || 24);
 
 const DB = globalThis.__NORA_TEAMS__ || (globalThis.__NORA_TEAMS__ = new Map());
@@ -32,20 +33,18 @@ export const handler = async (event) => {
 
     const state = team(code);
 
-    // --- INTRO (no audio needed) ---
+    // INTRO request from client
     if (body.intro) {
       const text = introText();
-      return speak(state, text, { control:{ intro:true }});
+      return speak(state, text, { control:{ intro:true }, tts:{ speed: 0.88 }});
     }
 
     // For regular path we need audio
     const roleClient = String(body.role||"employee");
     const audio = body.audio||{};
-    if (!audio.data || !audio.mime) {
-      return speak(state, "I’m listening—try again.");
-    }
+    if (!audio.data || !audio.mime) return speak(state, "I’m listening—try again.");
 
-    // --- STT (multi–format retries) ---
+    // --- STT with format retries ---
     let transcript = "";
     try { transcript = await transcribeRobust(audio.data, audio.mime); }
     catch { return speak(state, "I couldn’t hear that—try again."); }
@@ -53,7 +52,12 @@ export const handler = async (event) => {
     if (!raw) return speak(state, "I’m listening—try again.");
     const lower = raw.toLowerCase();
 
-    // --- quick role switching by voice ---
+    // Help / repeat intro on demand
+    if (/\b(help|how do i|how to|instructions|intro)\b/.test(lower)){
+      return speak(state, introText(), { tts:{ speed:0.88 }});
+    }
+
+    // Quick role switching
     if (ADMIN_ON_RE.test(lower) && roleClient !== "admin") {
       return speak(state, "Admin mode on. Go ahead with your update.", { control:{ role:"admin" }});
     }
@@ -61,7 +65,7 @@ export const handler = async (event) => {
       return speak(state, "Okay—this device is employee.", { control:{ role:"employee" }});
     }
 
-    // --- utilities ---
+    // Utilities
     if (/\b(repeat|say it again|repeat that|what about it)\b/.test(lower)) {
       return state.lastSay ? speak(state, state.lastSay) : speak(state, "There’s nothing to repeat yet.");
     }
@@ -73,14 +77,14 @@ export const handler = async (event) => {
       return speak(state, snapshot(state));
     }
 
-    // --- employee “what’s new” ---
+    // Employee "what's new"
     if (roleClient !== "admin" && /\b(what('?| i)s new|any updates|updates (today|for today))\b/.test(lower)) {
       return speak(state, whatsNew(state));
     }
 
     // --- ADMIN branch ---
     if (roleClient === "admin") {
-      // Q&A first (owner asking a question)
+      // Owner asking a question
       const looksQ = /[?]$/.test(raw) || /\b(what|when|where|who|why|how|which|do we|can we|should we)\b/i.test(raw);
       if (looksQ) {
         const a = await answerFromMemory(state, raw);
@@ -96,7 +100,7 @@ export const handler = async (event) => {
         return speak(state, rm ? pick(ACK_DELETE) : "I didn’t find that.");
       }
 
-      // Save (no jargon; infer long-term vs today)
+      // Save (infer long-term vs “today”)
       const isLongTerm =
         /(\bpermanent\b|\balways\b|\bpolicy\b|\bhandbook\b|\bprocedure\b|\bhours\b|\baddress\b|\bphone\b|\bsafety\b|\bmenu\b|\bforever\b|\bpersist\b|\bgeneral info\b)/i.test(raw) ||
         /^(remember|save|store|keep|log)\b/i.test(raw);
@@ -127,9 +131,13 @@ export const handler = async (event) => {
   }
 };
 
-// ---------- helpers ----------
+// ---------------- helpers ----------------
 function introText(){
-  return "Hi, I’m Nora. Admins say “admin” and speak updates—I’ll remember them. Employees can ask “what’s new?” or any question about saved info. Tap again to turn me off.";
+  // short, natural, and slowish (handled by TTS speed)
+  return "Hey, I’m Nora. Tap the button to talk; tap again to pause. "
+    + "If you’re the owner, say “admin”, then tell me the update—like hours, Wi-Fi, or anything the team should know. I’ll remember it. "
+    + "Team members can ask “what’s new?” or ask about saved info, like “what’s our Wi-Fi?”. "
+    + "You can also say “repeat” to hear the last thing. Ready when you are.";
 }
 function pick(a){ return a[Math.floor(Math.random()*a.length)] || a[0]; }
 function prune(state){
@@ -173,7 +181,7 @@ async function answerFromMemory(state, question){
     return {it, score: o/Math.max(1,Math.min(qset.size,w.size))};
   }).sort((a,b)=>b.score-a.score);
   const top = ranked.slice(0,8).map(x=>x.it.text);
-  const system = "You are Nora, a voice-first team assistant. Answer ONLY from the context. If it’s not covered, say you don’t have that yet. Keep answers brief and direct.";
+  const system = "You are Nora, a voice-first team assistant. Answer ONLY from the context. If it’s not covered, say you don’t have that yet. Keep answers brief.";
   const user   = `Question: ${question}\n\nContext:\n- ${top.join("\n- ")}`;
   const r = await fetch(`${OPENAI_ROOT}/chat/completions`,{
     method:"POST",
@@ -231,15 +239,16 @@ function extFor(m){
   return ".webm";
 }
 
-async function tts(text){
+async function tts(text, opts={}){
+  const speed = typeof opts.speed === "number" ? opts.speed : OPENAI_TTS_SPEED;
   const r=await fetch(`${OPENAI_ROOT}/audio/speech`,{
     method:"POST",
     headers:{Authorization:`Bearer ${OPENAI_API_KEY}`,"Content-Type":"application/json"},
-    body:JSON.stringify({model:TTS_MODEL,voice:OPENAI_TTS_VOICE,input:sculpt(text),response_format:"mp3",speed:1.0})
+    body:JSON.stringify({model:TTS_MODEL,voice:OPENAI_TTS_VOICE,input:sculpt(text),response_format:"mp3",speed})
   });
   if(!r.ok) throw new Error(`TTS ${r.status}: ${await r.text()}`);
   const b64 = Buffer.from(await r.arrayBuffer()).toString("base64");
   return `data:audio/mpeg;base64,${b64}`;
 }
 function sculpt(t){ let s=String(t||"").trim(); s=s.replace(/([.!?])\s+/g,"$1  "); if(!/[.!?…]$/.test(s)) s+="."; return s.slice(0,4000); }
-async function speak(state, text, extra){ state.lastSay=text; const audio=await tts(text); return json({audio, ...(extra||{})}); }
+async function speak(state, text, extra){ state.lastSay=text; const audio=await tts(text, extra?.tts||{}); return json({audio, ...(extra||{})}); }
