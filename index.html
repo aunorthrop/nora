@@ -17,12 +17,10 @@
     -webkit-user-select:none;user-select:none;touch-action:manipulation
   }
   .mic{
-    position:relative; z-index:10;
     width:180px;height:180px;border-radius:24px;border:none;background:#1f2330;
     box-shadow:0 10px 40px #0006, inset 0 -2px 0 #000a;
     display:flex;align-items:center;justify-content:center;
-    cursor:pointer;
-    transition:transform .06s ease, background .15s ease, box-shadow .15s ease
+    cursor:pointer; transition:transform .06s ease, background .15s ease, box-shadow .15s ease
   }
   .mic svg{width:42px;height:42px;fill:#e8ebf5;opacity:.95;pointer-events:none}
   .mic:active{transform:scale(.985)}
@@ -32,19 +30,10 @@
   .thinking{background:var(--think)}
   .error{background:var(--err)}
 
-  .fab{
-    position:fixed;right:18px;top:18px;width:44px;height:44px;border-radius:12px;background:#1f2330;
-    display:flex;align-items:center;justify-content:center;box-shadow:0 6px 24px #0006; z-index:9;
-    cursor:pointer; border:1px solid #2a2f44
-  }
-  .fab svg{width:22px;height:22px;fill:#cbd5e1;pointer-events:none}
-
-  .gate{
-    position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#0009;z-index:40;
-    pointer-events:auto;
-  }
-  .gate.hidden{display:none !important; pointer-events:none !important;}
-  .card{width:min(92vw,560px);background:#141824;border:1px solid #202334;border-radius:16px;padding:18px 18px 14px}
+  /* Team gate */
+  .gate{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#0009;z-index:40}
+  .gate.visible{display:flex}
+  .card{width:min(92vw,560px);background:#141824;border:1px solid #202334;border-radius:16px;padding:18px}
   .row{display:flex;gap:10px;margin-top:12px}
   .in{flex:1;background:#0f1220;border:1px solid #202334;border-radius:10px;color:#e5e7ee;padding:12px 14px;outline:none}
   .btn{padding:12px 14px;background:#334155;border:none;border-radius:10px;color:#e5e7ee;cursor:pointer}
@@ -57,138 +46,106 @@
 </head>
 <body>
 
-<!-- TEAM GATE -->
+<!-- Gate -->
 <div id="gate" class="gate">
   <div class="card">
-    <div style="font-weight:600">Join your team on Nora</div>
-    <div style="color:#9aa3b2;font-size:14px;margin-top:6px">Enter the 8-digit team code (####-####) you received after subscribing.</div>
+    <div style="font-weight:600">Enter team code</div>
+    <div style="color:#9aa3b2;font-size:14px;margin-top:6px">Format: ####-####</div>
     <div class="row">
       <input id="teamCode" class="in" placeholder="1234-5678" inputmode="numeric" maxlength="9" autocomplete="one-time-code">
       <button id="enterBtn" class="btn" type="button">Enter</button>
     </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
-      <div style="color:#94a3b8;font-size:12px">Demo code: <b>1234-5678</b></div>
-      <button id="buyBtn" class="btn primary" type="button">Subscribe — $10/mo</button>
-    </div>
+    <div style="margin-top:10px;color:#94a3b8;font-size:12px">Demo: <b>1234-5678</b></div>
   </div>
 </div>
 
-<!-- MIC -->
-<button id="mic" class="mic idle" aria-pressed="false" aria-label="Toggle Nora" type="button">
+<!-- Mic -->
+<button id="mic" class="mic idle" type="button" aria-label="Toggle Nora">
   <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c1.66 0 3 1.34 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/></svg>
 </button>
 
-<!-- Upload (top-right) -->
-<button id="uploadFab" class="fab" title="Upload PDFs" type="button" aria-label="Upload PDFs">
-  <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-</button>
-<input id="fileInput" type="file" accept="application/pdf" multiple style="display:none"/>
-
 <script>
 (()=> {
-  // DOM
-  const mic=document.getElementById('mic');
-  const gate=document.getElementById('gate');
-  const codeIn=document.getElementById('teamCode');
-  const enterBtn=document.getElementById('enterBtn');
-  const buyBtn=document.getElementById('buyBtn');
-  const uploadFab=document.getElementById('uploadFab');
-  const fileInput=document.getElementById('fileInput');
+  const mic = document.getElementById('mic');
+  const gate = document.getElementById('gate');
+  const codeIn = document.getElementById('teamCode');
+  const enterBtn = document.getElementById('enterBtn');
 
-  // Endpoints
   const API_VOICE='/.netlify/functions/voice';
-  const API_UPLOAD='/.netlify/functions/upload';
 
-  // Storage keys
   const LS_CODE='nora_team_code';
   const LS_ROLE='nora_role';
   const LS_INTRO_PREFIX='nora_intro_done_';
 
-  // Audio
-  const speaker=new Audio(); speaker.preload='none'; speaker.playsInline=true;
-  const earcon=new Audio();  earcon.preload='none'; earcon.playsInline=true;
-  const EARCON_ON = "data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAAAAP8AAP8AAP8AAP8AAP8AAP8A";
-  const EARCON_CAPTURE = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAAAAP8A/wD/AP8A/wD/AP8A/wD/AP8A";
+  const speaker = new Audio(); speaker.preload='none'; speaker.playsInline=true;
 
-  // State
-  let audioCtx, primed=false, isOn=false, isSpeaking=false, inflight=null;
-  let media=null, rec=null, chunks=[]; let micPrimed=false; let tapLock=false;
-  let loopRunning=false;
+  let audioCtx, isOn=false, isSpeaking=false, inflight=null;
+  let rec=null, media=null, chunks=[];
+  let loopRunning=false, micPrimed=false, primed=false;
 
-  // Utils
-  function toast(m){ const t=document.createElement('div'); t.className='toast'; t.textContent=m; document.body.appendChild(t); setTimeout(()=>{try{t.remove();}catch{}},2600); }
+  // --- Helpers
+  function toast(m){ const t=document.createElement('div'); t.className='toast'; t.textContent=m; document.body.appendChild(t); setTimeout(()=>{t.remove();},2600); }
   function setState(s){ mic.className='mic '+s; }
-  function hideGate(){ gate.classList.add('hidden'); gate.style.display='none'; }
-  function showGate(){ gate.classList.remove('hidden'); gate.style.display='flex'; }
+  function showGate(){ gate.classList.add('visible'); }
+  function hideGate(){ gate.classList.remove('visible'); }
   function normCode(s){ const t=String(s||'').replace(/[^0-9]/g,'').slice(0,8); return t.length===8? t.slice(0,4)+'-'+t.slice(4):''; }
 
   // Gate init
-  const existing = localStorage.getItem(LS_CODE);
-  if (existing) hideGate(); else showGate();
-  enterBtn.addEventListener('click', ()=>{
+  if(localStorage.getItem(LS_CODE)) hideGate(); else showGate();
+  enterBtn.onclick = ()=> {
     const c=normCode(codeIn.value)||codeIn.value.trim();
-    if(!/^\d{4}-\d{4}$/.test(c)){ toast('Enter a code like 1234-5678'); return; }
+    if(!/^\d{4}-\d{4}$/.test(c)){ toast('Use ####-####'); return; }
     localStorage.setItem(LS_CODE,c);
     localStorage.removeItem(LS_ROLE);
     hideGate();
-  });
-  buyBtn.addEventListener('click', ()=>{ window.location.href='https://buy.stripe.com/test_1234567890'; });
+  };
 
-  // Audio boot + permission
+  // --- Audio boot
   async function ensureAudio(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state!=='running') await audioCtx.resume(); }
-  async function primeAudioOnce(){
-    if(primed) return; try{
-      await ensureAudio();
-      const b=audioCtx.createBuffer(1,1,audioCtx.sampleRate);
-      const s=audioCtx.createBufferSource(); s.buffer=b; s.connect(audioCtx.destination); s.start(0);
-      // autoplay unlock
-      speaker.src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
-      await speaker.play().catch(()=>{}); speaker.pause(); speaker.currentTime=0;
-      primed=true;
-    }catch(e){ /* ignore */ }
+  async function primeOnce(){
+    if(primed) return;
+    await ensureAudio();
+    // one-sample “unlock” for iOS autoplay
+    const b=audioCtx.createBuffer(1,1,audioCtx.sampleRate);
+    const s=audioCtx.createBufferSource(); s.buffer=b; s.connect(audioCtx.destination); s.start(0);
+    primed=true;
   }
-  async function promptMicOnce(){
+  async function askMicPermissionOnce(){
     if(micPrimed) return;
-    const st = await navigator.mediaDevices.getUserMedia({
-      audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}
-    });
-    st.getTracks().forEach(t=>t.stop());
+    const t = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+    t.getTracks().forEach(x=>x.stop());
     micPrimed=true;
   }
 
-  // Playback (HTMLAudio + speechSynthesis fallback)
+  // --- Play audio (and guaranteed fallback with speechSynthesis)
   async function speakFallback(text){
     try{
       if(!('speechSynthesis' in window)) return false;
       const u=new SpeechSynthesisUtterance(String(text||""));
       u.rate=0.98; u.pitch=1.05; u.volume=1.0;
-      return await new Promise(res=>{
-        u.onend=()=>res(true); u.onerror=()=>res(false);
-        window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
-      });
+      return await new Promise(res=>{ u.onend=()=>res(true); u.onerror=()=>res(false); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); });
     }catch{ return false; }
   }
   async function playAudio(dataUrl, fallbackText=null){
     isSpeaking=true; setState('speaking');
-    let guard, ok=true;
     try{
       if(dataUrl){
         speaker.pause(); speaker.currentTime=0; speaker.src=dataUrl;
-        guard=setTimeout(()=>{ try{speaker.pause();}catch{} }, 45000);
         await speaker.play();
-        await new Promise(res => { speaker.onended=res; speaker.onpause=res; });
+        await new Promise(res=>{ speaker.onended=res; speaker.onpause=res; });
       }else if(fallbackText){
-        ok = await speakFallback(fallbackText);
+        await speakFallback(fallbackText);
       }
-    }catch(e){ ok=false; }
-    finally{ clearTimeout(guard); isSpeaking=false; if(isOn) setState('listening'); else setState('idle'); }
-    return ok;
+    }catch(e){
+      if(fallbackText) await speakFallback(fallbackText);
+    }
+    isSpeaking=false; setState(isOn?'listening':'idle');
   }
 
   function abortInFlight(){ try{ inflight?.abort(); }catch{} inflight=null; }
   function stopRecorder(){ try{rec?.stop();}catch{} try{media?.getTracks().forEach(t=>t.stop());}catch{} rec=null; media=null; }
 
-  // Recorder
+  // --- Recorder
   function pickMime(){ const M=window.MediaRecorder; if(!M||!M.isTypeSupported) return ""; const pref=["audio/mp4;codecs=mp4a.40.2","audio/m4a","audio/webm;codecs=opus","audio/webm","audio/mpeg","audio/wav"]; for(const m of pref) if(M.isTypeSupported(m)) return m; return ""; }
   async function startRecorder(){
     const mime=pickMime();
@@ -214,7 +171,7 @@
   }
   async function blobToB64(b){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onloadend=()=>res(String(fr.result).split(',')[1]); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(b); }); }
 
-  // Continuous loop (ensures single runner)
+  // --- Continuous loop (single-run guard)
   async function listenLoop(){
     if(loopRunning) return; loopRunning=true;
     while(isOn){
@@ -226,8 +183,6 @@
         stopRecorder();
         if(!isOn) break;
         if(!heard) continue;
-
-        try{ earcon.src = EARCON_CAPTURE; await earcon.play().catch(()=>{}); }catch{}
 
         const b64=await blobToB64(heard);
         const code=localStorage.getItem(LS_CODE)||'';
@@ -241,86 +196,65 @@
           body:JSON.stringify({businessId:code,audio:{data:b64,mime:heard.type},role}),
           signal:inflight.signal
         });
-        const data=await resp.json();
+        const data = await resp.json();
 
-        if(data.control?.requireCode){ isOn=false; setState('idle'); showGate(); toast('Enter your team code'); break; }
+        if(data.control?.requireCode){ isOn=false; setState('idle'); showGate(); break; }
         if(data.control?.role){ localStorage.setItem(LS_ROLE, data.control.role); }
 
-        if(data.audio){ await playAudio(data.audio); }
-        else if(data.error){ toast(data.error); setState(isOn?'listening':'idle'); }
-        else setState(isOn?'listening':'idle');
+        // Prefer server audio, fallback to simple TTS if missing
+        const say = data.response || data.text || "";
+        if(data.audio) await playAudio(data.audio);
+        else await playAudio(null, say || "Okay.");
 
       }catch(e){
         if(e && e.name==='AbortError'){ /* ignore */ }
-        else { setState('error'); toast(String(e.message||e)); await new Promise(r=>setTimeout(r,280)); setState(isOn?'listening':'idle'); }
+        else { setState('error'); toast(String(e.message||'error')); await new Promise(r=>setTimeout(r,250)); setState(isOn?'listening':'idle'); }
       }
     }
     loopRunning=false;
   }
 
-  // Toggle
+  // --- Tap to toggle
   mic.addEventListener('click', async ()=>{
-    if(tapLock) return; tapLock=true; setTimeout(()=>tapLock=false,180);
-    if(getComputedStyle(gate).display!=='none'){ showGate(); return; }
+    // Force code gate first
+    if(!localStorage.getItem(LS_CODE)){ showGate(); return; }
 
-    if(isSpeaking){ speaker.pause(); return; }
-
-    const code = localStorage.getItem(LS_CODE);
-    if(!code){ showGate(); return; }
+    if(isSpeaking){ try{speaker.pause();}catch{} return; } // interrupt
 
     if(!isOn){
       isOn=true; mic.setAttribute('aria-pressed','true');
       try{
-        await primeAudioOnce();
-        await promptMicOnce();
+        await primeOnce();                 // unlock audio on iOS
+        await askMicPermissionOnce();      // **prompt mic permission right now**
       }catch(e){
         isOn=false; mic.setAttribute('aria-pressed','false'); setState('error'); toast('Microphone permission is required'); return;
       }
 
-      // tiny earcon: “I’m on”
-      try{ earcon.src = EARCON_ON; await earcon.play().catch(()=>{}); }catch{}
+      // INTRO once per team — if server TTS fails, browser TTS guarantees sound
       setState('speaking');
-
-      // INTRO once per team (server TTS, with browser TTS fallback)
+      const code=localStorage.getItem(LS_CODE);
       const introKey=LS_INTRO_PREFIX+code;
       if(!localStorage.getItem(introKey)){
         try{
           const r=await fetch(API_VOICE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,intro:true})});
           const j=await r.json();
-          let ok=false;
-          if(j.audio) ok = await playAudio(j.audio);
-          if(!ok){ // fallback voice so the user always hears something
-            ok = await speakFallback("Hi, I’m Nora. I’m on. If you’re the owner, say admin and tell me the updates. I’ll remember them. Team members can ask what’s new or anything we’ve saved. Tap again to turn me off.");
-          }
+          const fallbackText = "Hi, I’m Nora. I’m on. If you’re the owner, say “admin” and tell me the updates—I'll remember them. Team members can ask “what’s new?” or anything we’ve saved. Tap again to turn me off.";
+          if(j.audio) await playAudio(j.audio, fallbackText);
+          else await playAudio(null, fallbackText);
           localStorage.setItem(introKey,'1');
         }catch{
-          await speakFallback("Hi, I’m Nora. I’m on. If you’re the owner, say admin and tell me the updates. I’ll remember them. Team members can ask what’s new or anything we’ve saved. Tap again to turn me off.");
+          await playAudio(null, "Hi, I’m Nora. I’m on. If you’re the owner, say “admin” and tell me the updates—I'll remember them. Team members can ask “what’s new?” or anything we’ve saved. Tap again to turn me off.");
         }
       }
-
       setState('listening');
       listenLoop();
     } else {
       isOn=false; mic.setAttribute('aria-pressed','false');
       abortInFlight(); stopRecorder(); setState('idle');
     }
-  }, {passive:true});
-
-  // Uploads
-  uploadFab.addEventListener('click', ()=> fileInput.click(), {passive:true});
-  fileInput.addEventListener('change', async ()=>{
-    const files=[...(fileInput.files||[])].filter(f=>/pdf$/i.test(f.type));
-    if(!files.length){ toast('PDFs only'); return; }
-    const code=localStorage.getItem(LS_CODE)||'';
-    for(const f of files){
-      const b64=await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onloadend=()=>res(String(fr.result).split(',')[1]); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(f); });
-      const r=await fetch(API_UPLOAD,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,name:f.name,data:b64})});
-      const j=await r.json(); if(j.error) toast('Upload failed: '+j.error); else toast('Uploaded '+f.name);
-    }
-    fileInput.value='';
   });
 
-  // errors
+  // Errors → on-screen
   window.addEventListener('error', e=> toast(e.message||'error'));
   window.addEventListener('unhandledrejection', e=> { const m=String(e.reason||''); if(!/AbortError/i.test(m)) toast(m); });
 })();
