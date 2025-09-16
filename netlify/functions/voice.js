@@ -5,7 +5,7 @@ const CHAT_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const STT_MODEL  = "whisper-1";
 const TTS_MODEL  = "tts-1";
 const OPENAI_TTS_VOICE  = process.env.OPENAI_TTS_VOICE || "shimmer";
-const OPENAI_TTS_SPEED  = parseFloat(process.env.OPENAI_TTS_SPEED || "1.0"); // natural baseline
+const OPENAI_TTS_SPEED  = parseFloat(process.env.OPENAI_TTS_SPEED || "1.0");
 
 const UPDATES_TTL_HOURS  = Number(process.env.UPDATES_TTL_HOURS  || 168);
 const BRIEF_WINDOW_HOURS = Number(process.env.BRIEF_WINDOW_HOURS || 24);
@@ -23,8 +23,9 @@ const ACK_DELETE = ["Deleted.", "Removed.", "Erased."];
 
 const ADMIN_ON_RE = /\b(admin( mode)?|i'?m the admin|i am admin|set admin|switch to admin)\b/i;
 const EMP_ON_RE   = /\b(employee( mode)?|i'?m (an )?employee|set employee|switch to employee)\b/i;
+const SAVE_INTENT = /^(remember|save|store|keep|log)\b|(\badd|note|please remember|make a note)\b/i;
 
-export const handler = async (event) => {
+exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return json({ok:true});
   try{
     const body = JSON.parse(event.body||"{}");
@@ -33,17 +34,17 @@ export const handler = async (event) => {
 
     const state = team(code);
 
-    // INTRO request from client
+    // INTRO
     if (body.intro) {
       const text = introText();
-      return speak(state, text, { control:{ intro:true }, tts:{ speed: 0.98 }}); // slightly slower, not robotic
+      return speak(state, text, { control:{ intro:true }, tts:{ speed: 0.98 }});
     }
 
     const roleClient = String(body.role||"employee");
     const audio = body.audio||{};
     if (!audio.data || !audio.mime) return speak(state, "I’m listening—try again.");
 
-    // --- STT robust ---
+    // STT
     let transcript = "";
     try { transcript = await transcribeRobust(audio.data, audio.mime); }
     catch { return speak(state, "I couldn’t hear that—try again."); }
@@ -51,7 +52,7 @@ export const handler = async (event) => {
     if (!raw) return speak(state, "I’m listening—try again.");
     const lower = raw.toLowerCase();
 
-    // Help / repeat intro
+    // Help / intro
     if (/\b(help|how do i|how to|instructions|intro)\b/.test(lower)){
       return speak(state, introText(), { tts:{ speed:0.98 }});
     }
@@ -64,7 +65,7 @@ export const handler = async (event) => {
       return speak(state, "Okay—this device is employee.", { control:{ role:"employee" }});
     }
 
-    // Utilities
+    // Repeat / memory snapshot
     if (/\b(repeat|say it again|repeat that|what about it)\b/.test(lower)) {
       return state.lastSay ? speak(state, state.lastSay) : speak(state, "There’s nothing to repeat yet.");
     }
@@ -81,6 +82,15 @@ export const handler = async (event) => {
       return speak(state, whatsNew(state));
     }
 
+    // --- SAVE INTENT (more forgiving) ---
+    if (SAVE_INTENT.test(raw)) {
+      // If not admin, do a one-shot escalation with a gentle confirmation
+      if (roleClient !== "admin") {
+        return speak(state, "I can save that, but only the admin can add info. If you’re the admin, say “admin” and repeat it.");
+      }
+      // admin path continues below as a regular update/long-term save
+    }
+
     // --- ADMIN branch ---
     if (roleClient === "admin") {
       const looksQ = /[?]$/.test(raw) || /\b(what|when|where|who|why|how|which|do we|can we|should we)\b/i.test(raw);
@@ -90,6 +100,7 @@ export const handler = async (event) => {
         return speak(state, a);
       }
 
+      // Delete
       if (/^(delete|remove|forget)\b/i.test(raw)) {
         const tail = raw.replace(/^(delete|remove|forget)\b[:\-]?\s*/i,"").trim();
         if (!tail) return speak(state, "Tell me what to delete.");
@@ -97,11 +108,12 @@ export const handler = async (event) => {
         return speak(state, rm ? pick(ACK_DELETE) : "I didn’t find that.");
       }
 
+      // Heuristic: treat as long-term if policy-ish words present
       const isLongTerm =
         /(\bpermanent\b|\balways\b|\bpolicy\b|\bhandbook\b|\bprocedure\b|\bhours\b|\baddress\b|\bphone\b|\bsafety\b|\bmenu\b|\bforever\b|\bpersist\b|\bgeneral info\b)/i.test(raw) ||
-        /^(remember|save|store|keep|log)\b/i.test(raw);
+        SAVE_INTENT.test(raw);
 
-      const cleaned = raw.replace(/^(remember|save|store|keep|log)\b[:\-]?\s*/i,"").trim();
+      const cleaned = raw.replace(SAVE_INTENT, "").replace(/^[:\-.,\s]+/,"").trim();
       const text = cleaned || raw;
 
       if (isLongTerm) {
@@ -127,9 +139,9 @@ export const handler = async (event) => {
   }
 };
 
-// ---------------- helpers ----------------
+// -------------- helpers --------------
 function introText(){
-  return "Hi, I’m Nora. Tap the button once to turn me on—then we just talk. "
+  return "Hi, I’m Nora. Tap once to turn me on—then we just talk. "
     + "If you’re the owner, say “admin” and tell me the updates. I’ll remember them. "
     + "Team members can ask “what’s new?” or anything we’ve saved, like Wi-Fi or hours. "
     + "Tap again to turn me off.";
