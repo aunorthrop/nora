@@ -1,0 +1,8 @@
+{
+  "name": "nora-voice-only",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "undici": "^6.19.8"
+  }
+}
