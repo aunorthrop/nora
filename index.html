@@ -16,7 +16,6 @@
     font-family:ui-sans-serif,system-ui,-apple-system,"Inter",Segoe UI,Roboto,Arial;
     -webkit-user-select:none;user-select:none;touch-action:manipulation
   }
-  /* main mic */
   .mic{
     position:relative; z-index:10;
     width:180px;height:180px;border-radius:24px;border:none;background:#1f2330;
@@ -33,7 +32,6 @@
   .thinking{background:var(--think)}
   .error{background:var(--err)}
 
-  /* top-right + button */
   .fab{
     position:fixed;right:18px;top:18px;width:44px;height:44px;border-radius:12px;background:#1f2330;
     display:flex;align-items:center;justify-content:center;box-shadow:0 6px 24px #0006; z-index:9;
@@ -41,7 +39,6 @@
   }
   .fab svg{width:22px;height:22px;fill:#cbd5e1;pointer-events:none}
 
-  /* gate overlay (team code) */
   .gate{
     position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#0009;z-index:40;
     pointer-events:auto;
@@ -89,7 +86,7 @@
 
 <script>
 (()=> {
-  // ---- DOM refs
+  // DOM
   const mic=document.getElementById('mic');
   const gate=document.getElementById('gate');
   const codeIn=document.getElementById('teamCode');
@@ -98,39 +95,36 @@
   const uploadFab=document.getElementById('uploadFab');
   const fileInput=document.getElementById('fileInput');
 
-  // ---- Endpoints
+  // Endpoints
   const API_VOICE='/.netlify/functions/voice';
   const API_UPLOAD='/.netlify/functions/upload';
 
-  // ---- Local storage keys
+  // Storage keys
   const LS_CODE='nora_team_code';
   const LS_ROLE='nora_role';
   const LS_INTRO_PREFIX='nora_intro_done_';
 
-  // ---- Audio objects
+  // Audio
   const speaker=new Audio(); speaker.preload='none'; speaker.playsInline=true;
   const earcon=new Audio();  earcon.preload='none'; earcon.playsInline=true;
-  const EARCON_ON = "data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAAAAP8AAP8AAP8AAP8AAP8AAP8A"; // tiny click
+  const EARCON_ON = "data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAAAAP8AAP8AAP8AAP8AAP8AAP8A";
   const EARCON_CAPTURE = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAAAAP8A/wD/AP8A/wD/AP8A/wD/AP8A";
 
-  // ---- State
+  // State
   let audioCtx, primed=false, isOn=false, isSpeaking=false, inflight=null;
   let media=null, rec=null, chunks=[]; let micPrimed=false; let tapLock=false;
+  let loopRunning=false;
 
-  // ---- Helpers
+  // Utils
   function toast(m){ const t=document.createElement('div'); t.className='toast'; t.textContent=m; document.body.appendChild(t); setTimeout(()=>{try{t.remove();}catch{}},2600); }
   function setState(s){ mic.className='mic '+s; }
-
-  // prevent overlay blocking clicks when hidden
   function hideGate(){ gate.classList.add('hidden'); gate.style.display='none'; }
   function showGate(){ gate.classList.remove('hidden'); gate.style.display='flex'; }
-
   function normCode(s){ const t=String(s||'').replace(/[^0-9]/g,'').slice(0,8); return t.length===8? t.slice(0,4)+'-'+t.slice(4):''; }
 
-  // Initial gate decision
+  // Gate init
   const existing = localStorage.getItem(LS_CODE);
   if (existing) hideGate(); else showGate();
-
   enterBtn.addEventListener('click', ()=>{
     const c=normCode(codeIn.value)||codeIn.value.trim();
     if(!/^\d{4}-\d{4}$/.test(c)){ toast('Enter a code like 1234-5678'); return; }
@@ -140,13 +134,14 @@
   });
   buyBtn.addEventListener('click', ()=>{ window.location.href='https://buy.stripe.com/test_1234567890'; });
 
-  // ---- Audio boot + permission
+  // Audio boot + permission
   async function ensureAudio(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state!=='running') await audioCtx.resume(); }
   async function primeAudioOnce(){
     if(primed) return; try{
       await ensureAudio();
       const b=audioCtx.createBuffer(1,1,audioCtx.sampleRate);
       const s=audioCtx.createBufferSource(); s.buffer=b; s.connect(audioCtx.destination); s.start(0);
+      // autoplay unlock
       speaker.src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
       await speaker.play().catch(()=>{}); speaker.pause(); speaker.currentTime=0;
       primed=true;
@@ -161,23 +156,39 @@
     micPrimed=true;
   }
 
-  // ---- Playback (single path)
-  async function playAudio(dataUrl){
-    isSpeaking=true; setState('speaking');
-    let guard;
+  // Playback (HTMLAudio + speechSynthesis fallback)
+  async function speakFallback(text){
     try{
-      speaker.pause(); speaker.currentTime=0; speaker.src=dataUrl;
-      guard=setTimeout(()=>{ try{speaker.pause();}catch{} }, 45000);
-      await speaker.play();
-      await new Promise(res => { speaker.onended=res; speaker.onpause=res; });
-    }catch(e){ if(!(e&&e.name==='AbortError')) toast('audio error'); }
+      if(!('speechSynthesis' in window)) return false;
+      const u=new SpeechSynthesisUtterance(String(text||""));
+      u.rate=0.98; u.pitch=1.05; u.volume=1.0;
+      return await new Promise(res=>{
+        u.onend=()=>res(true); u.onerror=()=>res(false);
+        window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
+      });
+    }catch{ return false; }
+  }
+  async function playAudio(dataUrl, fallbackText=null){
+    isSpeaking=true; setState('speaking');
+    let guard, ok=true;
+    try{
+      if(dataUrl){
+        speaker.pause(); speaker.currentTime=0; speaker.src=dataUrl;
+        guard=setTimeout(()=>{ try{speaker.pause();}catch{} }, 45000);
+        await speaker.play();
+        await new Promise(res => { speaker.onended=res; speaker.onpause=res; });
+      }else if(fallbackText){
+        ok = await speakFallback(fallbackText);
+      }
+    }catch(e){ ok=false; }
     finally{ clearTimeout(guard); isSpeaking=false; if(isOn) setState('listening'); else setState('idle'); }
+    return ok;
   }
 
   function abortInFlight(){ try{ inflight?.abort(); }catch{} inflight=null; }
   function stopRecorder(){ try{rec?.stop();}catch{} try{media?.getTracks().forEach(t=>t.stop());}catch{} rec=null; media=null; }
 
-  // ---- Recorder
+  // Recorder
   function pickMime(){ const M=window.MediaRecorder; if(!M||!M.isTypeSupported) return ""; const pref=["audio/mp4;codecs=mp4a.40.2","audio/m4a","audio/webm;codecs=opus","audio/webm","audio/mpeg","audio/wav"]; for(const m of pref) if(M.isTypeSupported(m)) return m; return ""; }
   async function startRecorder(){
     const mime=pickMime();
@@ -203,8 +214,9 @@
   }
   async function blobToB64(b){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onloadend=()=>res(String(fr.result).split(',')[1]); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(b); }); }
 
-  // ---- Continuous loop (half-duplex)
+  // Continuous loop (ensures single runner)
   async function listenLoop(){
+    if(loopRunning) return; loopRunning=true;
     while(isOn){
       try{
         if(isSpeaking){ await new Promise(r=>setTimeout(r,60)); continue; }
@@ -215,7 +227,6 @@
         if(!isOn) break;
         if(!heard) continue;
 
-        // capture earcon
         try{ earcon.src = EARCON_CAPTURE; await earcon.play().catch(()=>{}); }catch{}
 
         const b64=await blobToB64(heard);
@@ -232,7 +243,7 @@
         });
         const data=await resp.json();
 
-        if(data.control?.requireCode){ isOn=false; setState('idle'); showGate(); toast('Enter your team code'); return; }
+        if(data.control?.requireCode){ isOn=false; setState('idle'); showGate(); toast('Enter your team code'); break; }
         if(data.control?.role){ localStorage.setItem(LS_ROLE, data.control.role); }
 
         if(data.audio){ await playAudio(data.audio); }
@@ -244,52 +255,58 @@
         else { setState('error'); toast(String(e.message||e)); await new Promise(r=>setTimeout(r,280)); setState(isOn?'listening':'idle'); }
       }
     }
+    loopRunning=false;
   }
 
-  // ---- Toggle
+  // Toggle
   mic.addEventListener('click', async ()=>{
     if(tapLock) return; tapLock=true; setTimeout(()=>tapLock=false,180);
+    if(getComputedStyle(gate).display!=='none'){ showGate(); return; }
 
-    // deny overlay from blocking clicks if we can see mic
-    if(getComputedStyle(gate).display!=='none') { showGate(); return; }
-
-    if(isSpeaking){ speaker.pause(); return; } // interrupt
+    if(isSpeaking){ speaker.pause(); return; }
 
     const code = localStorage.getItem(LS_CODE);
     if(!code){ showGate(); return; }
 
     if(!isOn){
-      // ON: prime, permission, on-earcon, intro (once), then loop
       isOn=true; mic.setAttribute('aria-pressed','true');
       try{
         await primeAudioOnce();
-        await promptMicOnce();               // guarantees permission prompt on first tap
+        await promptMicOnce();
       }catch(e){
         isOn=false; mic.setAttribute('aria-pressed','false'); setState('error'); toast('Microphone permission is required'); return;
       }
 
-      // on-earcon to show we're alive
+      // tiny earcon: “I’m on”
       try{ earcon.src = EARCON_ON; await earcon.play().catch(()=>{}); }catch{}
-      setState('speaking');                  // immediate visual
+      setState('speaking');
 
+      // INTRO once per team (server TTS, with browser TTS fallback)
       const introKey=LS_INTRO_PREFIX+code;
       if(!localStorage.getItem(introKey)){
         try{
           const r=await fetch(API_VOICE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,intro:true})});
-          const j=await r.json(); if(j.audio) await playAudio(j.audio);
+          const j=await r.json();
+          let ok=false;
+          if(j.audio) ok = await playAudio(j.audio);
+          if(!ok){ // fallback voice so the user always hears something
+            ok = await speakFallback("Hi, I’m Nora. I’m on. If you’re the owner, say admin and tell me the updates. I’ll remember them. Team members can ask what’s new or anything we’ve saved. Tap again to turn me off.");
+          }
           localStorage.setItem(introKey,'1');
-        }catch{ /* ignore intro failure */ }
+        }catch{
+          await speakFallback("Hi, I’m Nora. I’m on. If you’re the owner, say admin and tell me the updates. I’ll remember them. Team members can ask what’s new or anything we’ve saved. Tap again to turn me off.");
+        }
       }
+
       setState('listening');
       listenLoop();
     } else {
-      // OFF
       isOn=false; mic.setAttribute('aria-pressed','false');
       abortInFlight(); stopRecorder(); setState('idle');
     }
   }, {passive:true});
 
-  // ---- Uploads (top-right)
+  // Uploads
   uploadFab.addEventListener('click', ()=> fileInput.click(), {passive:true});
   fileInput.addEventListener('change', async ()=>{
     const files=[...(fileInput.files||[])].filter(f=>/pdf$/i.test(f.type));
@@ -303,7 +320,7 @@
     fileInput.value='';
   });
 
-  // surface runtime exceptions
+  // errors
   window.addEventListener('error', e=> toast(e.message||'error'));
   window.addEventListener('unhandledrejection', e=> { const m=String(e.reason||''); if(!/AbortError/i.test(m)) toast(m); });
 })();
