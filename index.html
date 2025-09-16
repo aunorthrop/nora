@@ -9,61 +9,87 @@
     --bg:#0e0f13; --tile:#151821; --text:#e5e7ee; --muted:#9aa3b2;
     --lav:#a78bfa; --lav-ghost:#a78bfa26; --speak:#22c55e; --think:#facc15; --err:#ef4444;
   }
-  html,body{height:100%} body{margin:0;background:var(--bg);color:var(--text);
-    display:flex;align-items:center;justify-content:center;font-family:ui-sans-serif,system-ui,-apple-system,"Inter",Segoe UI,Roboto,Arial;
-    -webkit-user-select:none;user-select:none;touch-action:manipulation}
-  .mic{width:180px;height:180px;border-radius:24px;border:none;background:#1f2330;
-    box-shadow:0 10px 40px #0006, inset 0 -2px 0 #000a;display:flex;align-items:center;justify-content:center;cursor:pointer;
-    transition:transform .06s ease, background .15s ease, box-shadow .15s ease}
-  .mic svg{width:42px;height:42px;fill:#e8ebf5;opacity:.95}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--text);
+    display:flex;align-items:center;justify-content:center;
+    font-family:ui-sans-serif,system-ui,-apple-system,"Inter",Segoe UI,Roboto,Arial;
+    -webkit-user-select:none;user-select:none;touch-action:manipulation
+  }
+  /* main mic */
+  .mic{
+    position:relative; z-index:10;
+    width:180px;height:180px;border-radius:24px;border:none;background:#1f2330;
+    box-shadow:0 10px 40px #0006, inset 0 -2px 0 #000a;
+    display:flex;align-items:center;justify-content:center;
+    cursor:pointer;
+    transition:transform .06s ease, background .15s ease, box-shadow .15s ease
+  }
+  .mic svg{width:42px;height:42px;fill:#e8ebf5;opacity:.95;pointer-events:none}
   .mic:active{transform:scale(.985)}
   .idle{background:#1f2330}
   .listening{background:var(--lav); box-shadow:0 0 0 10px var(--lav-ghost), 0 10px 40px #0008}
   .speaking{background:var(--speak)}
   .thinking{background:var(--think)}
   .error{background:var(--err)}
-  .fab{position:fixed;right:18px;top:18px;width:42px;height:42px;border-radius:10px;background:#1f2330;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 24px #0006}
-  .fab svg{width:22px;height:22px;fill:#cbd5e1}
-  .gate{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0009;z-index:40}
+
+  /* top-right + button */
+  .fab{
+    position:fixed;right:18px;top:18px;width:44px;height:44px;border-radius:12px;background:#1f2330;
+    display:flex;align-items:center;justify-content:center;box-shadow:0 6px 24px #0006; z-index:9;
+    cursor:pointer; border:1px solid #2a2f44
+  }
+  .fab svg{width:22px;height:22px;fill:#cbd5e1;pointer-events:none}
+
+  /* gate overlay (team code) */
+  .gate{
+    position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#0009;z-index:40;
+    pointer-events:auto;
+  }
+  .gate.hidden{display:none !important; pointer-events:none !important;}
   .card{width:min(92vw,560px);background:#141824;border:1px solid #202334;border-radius:16px;padding:18px 18px 14px}
   .row{display:flex;gap:10px;margin-top:12px}
   .in{flex:1;background:#0f1220;border:1px solid #202334;border-radius:10px;color:#e5e7ee;padding:12px 14px;outline:none}
   .btn{padding:12px 14px;background:#334155;border:none;border-radius:10px;color:#e5e7ee;cursor:pointer}
   .btn.primary{background:#2563eb}
-  .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f2330;color:#fff;padding:10px 14px;border-radius:10px;border:1px solid #2a2f44;box-shadow:0 8px 30px #0007;font-size:14px;z-index:50}
+
+  .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);
+    background:#1f2330;color:#fff;padding:10px 14px;border-radius:10px;border:1px solid #2a2f44;
+    box-shadow:0 8px 30px #0007;font-size:14px;z-index:50}
 </style>
 </head>
 <body>
 
 <!-- TEAM GATE -->
-<div id="gate" class="gate" style="display:none">
+<div id="gate" class="gate">
   <div class="card">
     <div style="font-weight:600">Join your team on Nora</div>
     <div style="color:#9aa3b2;font-size:14px;margin-top:6px">Enter the 8-digit team code (####-####) you received after subscribing.</div>
     <div class="row">
-      <input id="teamCode" class="in" placeholder="1234-5678" inputmode="numeric" maxlength="9">
-      <button id="enterBtn" class="btn">Enter</button>
+      <input id="teamCode" class="in" placeholder="1234-5678" inputmode="numeric" maxlength="9" autocomplete="one-time-code">
+      <button id="enterBtn" class="btn" type="button">Enter</button>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
       <div style="color:#94a3b8;font-size:12px">Demo code: <b>1234-5678</b></div>
-      <button id="buyBtn" class="btn primary">Subscribe — $10/mo</button>
+      <button id="buyBtn" class="btn primary" type="button">Subscribe — $10/mo</button>
     </div>
   </div>
 </div>
 
 <!-- MIC -->
-<button id="mic" class="mic idle" aria-label="Toggle Nora">
+<button id="mic" class="mic idle" aria-pressed="false" aria-label="Toggle Nora" type="button">
   <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c1.66 0 3 1.34 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/></svg>
 </button>
 
-<!-- (optional) upload button preserved -->
-<div id="uploadFab" class="fab" title="Upload PDFs">
+<!-- Upload (top-right) -->
+<button id="uploadFab" class="fab" title="Upload PDFs" type="button" aria-label="Upload PDFs">
   <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-</div>
+</button>
 <input id="fileInput" type="file" accept="application/pdf" multiple style="display:none"/>
 
 <script>
 (()=> {
+  // ---- DOM refs
   const mic=document.getElementById('mic');
   const gate=document.getElementById('gate');
   const codeIn=document.getElementById('teamCode');
@@ -72,70 +98,86 @@
   const uploadFab=document.getElementById('uploadFab');
   const fileInput=document.getElementById('fileInput');
 
+  // ---- Endpoints
   const API_VOICE='/.netlify/functions/voice';
   const API_UPLOAD='/.netlify/functions/upload';
+
+  // ---- Local storage keys
   const LS_CODE='nora_team_code';
   const LS_ROLE='nora_role';
   const LS_INTRO_PREFIX='nora_intro_done_';
 
-  // soft capture earcon (very short)
-  const CAPTURE_BEEP = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAAAAP8A/wD/AP8A/wD/AP8A/wD/AP8A";
-
+  // ---- Audio objects
   const speaker=new Audio(); speaker.preload='none'; speaker.playsInline=true;
   const earcon=new Audio();  earcon.preload='none'; earcon.playsInline=true;
+  const EARCON_ON = "data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAAAAP8AAP8AAP8AAP8AAP8AAP8A"; // tiny click
+  const EARCON_CAPTURE = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAAAAP8A/wD/AP8A/wD/AP8A/wD/AP8A";
 
+  // ---- State
   let audioCtx, primed=false, isOn=false, isSpeaking=false, inflight=null;
-  let media=null, rec=null, chunks=[]; let micPrimed=false;
+  let media=null, rec=null, chunks=[]; let micPrimed=false; let tapLock=false;
 
-  function toast(m){ const t=document.createElement('div'); t.className='toast'; t.textContent=m; document.body.appendChild(t); setTimeout(()=>{try{t.remove();}catch{}},3000); }
+  // ---- Helpers
+  function toast(m){ const t=document.createElement('div'); t.className='toast'; t.textContent=m; document.body.appendChild(t); setTimeout(()=>{try{t.remove();}catch{}},2600); }
   function setState(s){ mic.className='mic '+s; }
 
-  // Gate
-  function normCode(s){ const t=String(s||'').replace(/[^0-9]/g,'').slice(0,8); return t.length===8? t.slice(0,4)+'-'+t.slice(4):''; }
-  function showGate(){ gate.style.display='flex'; codeIn.value=localStorage.getItem(LS_CODE)||''; }
-  function hideGate(){ gate.style.display='none'; }
-  if(!localStorage.getItem(LS_CODE)) showGate();
-  enterBtn.onclick=()=>{ const c=normCode(codeIn.value)||codeIn.value.trim(); if(!/^\d{4}-\d{4}$/.test(c)){ toast('Enter a code like 1234-5678'); return; } localStorage.setItem(LS_CODE,c); hideGate(); localStorage.removeItem(LS_ROLE); };
-  buyBtn.onclick=()=>{ window.location.href='https://buy.stripe.com/test_1234567890'; };
+  // prevent overlay blocking clicks when hidden
+  function hideGate(){ gate.classList.add('hidden'); gate.style.display='none'; }
+  function showGate(){ gate.classList.remove('hidden'); gate.style.display='flex'; }
 
-  // Audio boot + mic permission
+  function normCode(s){ const t=String(s||'').replace(/[^0-9]/g,'').slice(0,8); return t.length===8? t.slice(0,4)+'-'+t.slice(4):''; }
+
+  // Initial gate decision
+  const existing = localStorage.getItem(LS_CODE);
+  if (existing) hideGate(); else showGate();
+
+  enterBtn.addEventListener('click', ()=>{
+    const c=normCode(codeIn.value)||codeIn.value.trim();
+    if(!/^\d{4}-\d{4}$/.test(c)){ toast('Enter a code like 1234-5678'); return; }
+    localStorage.setItem(LS_CODE,c);
+    localStorage.removeItem(LS_ROLE);
+    hideGate();
+  });
+  buyBtn.addEventListener('click', ()=>{ window.location.href='https://buy.stripe.com/test_1234567890'; });
+
+  // ---- Audio boot + permission
   async function ensureAudio(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state!=='running') await audioCtx.resume(); }
-  async function primeAudioOnce(){ if(primed) return; try{
+  async function primeAudioOnce(){
+    if(primed) return; try{
       await ensureAudio();
       const b=audioCtx.createBuffer(1,1,audioCtx.sampleRate);
       const s=audioCtx.createBufferSource(); s.buffer=b; s.connect(audioCtx.destination); s.start(0);
       speaker.src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
       await speaker.play().catch(()=>{}); speaker.pause(); speaker.currentTime=0;
       primed=true;
-  }catch{} }
+    }catch(e){ /* ignore */ }
+  }
   async function promptMicOnce(){
     if(micPrimed) return;
-    try{
-      const test=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
-      test.getTracks().forEach(t=>t.stop());
-      micPrimed=true;
-    }catch(e){
-      toast('Microphone permission is required'); throw e;
-    }
+    const st = await navigator.mediaDevices.getUserMedia({
+      audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}
+    });
+    st.getTracks().forEach(t=>t.stop());
+    micPrimed=true;
   }
 
-  // Playback (HTMLAudio only)
+  // ---- Playback (single path)
   async function playAudio(dataUrl){
     isSpeaking=true; setState('speaking');
-    let guard; // hard guard in case onended fails on some browsers
+    let guard;
     try{
       speaker.pause(); speaker.currentTime=0; speaker.src=dataUrl;
       guard=setTimeout(()=>{ try{speaker.pause();}catch{} }, 45000);
       await speaker.play();
       await new Promise(res => { speaker.onended=res; speaker.onpause=res; });
-    }catch(e){ if(!(e&&e.name==='AbortError')) toast('playback error'); }
+    }catch(e){ if(!(e&&e.name==='AbortError')) toast('audio error'); }
     finally{ clearTimeout(guard); isSpeaking=false; if(isOn) setState('listening'); else setState('idle'); }
   }
 
   function abortInFlight(){ try{ inflight?.abort(); }catch{} inflight=null; }
   function stopRecorder(){ try{rec?.stop();}catch{} try{media?.getTracks().forEach(t=>t.stop());}catch{} rec=null; media=null; }
 
-  // Recorder
+  // ---- Recorder
   function pickMime(){ const M=window.MediaRecorder; if(!M||!M.isTypeSupported) return ""; const pref=["audio/mp4;codecs=mp4a.40.2","audio/m4a","audio/webm;codecs=opus","audio/webm","audio/mpeg","audio/wav"]; for(const m of pref) if(M.isTypeSupported(m)) return m; return ""; }
   async function startRecorder(){
     const mime=pickMime();
@@ -144,32 +186,28 @@
     chunks=[]; rec.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
     rec.start(150); return rec;
   }
-
-  // More sensitive utterance detection + longer linger
   function waitUtterance(r){
     return new Promise(resolve=>{
-      let start=performance.now(), last=start, heard=false, accum=0, frames=0;
+      let start=performance.now(), last=start, heard=false;
       const iv=setInterval(()=>{
         const now=performance.now();
-        // crude VAD: if we have chunks, we consider speech happening
         if(chunks.length){ heard=true; last=now; }
-        // linger longer so slower speakers are captured
-        if(heard && now-last>1200){
+        if(heard && now-last>1100){
           clearInterval(iv); try{r.stop();}catch{} setTimeout(()=>{
-            const b=new Blob(chunks,{type:r.mimeType||'audio/webm'}); chunks=[]; resolve(b.size>1500?b:null);
+            const b=new Blob(chunks,{type:r.mimeType||'audio/webm'}); chunks=[]; resolve(b.size>1400?b:null);
           },140);
         }
         if(now-start>14000){ clearInterval(iv); try{r.stop();}catch{} resolve(null); }
       },120);
     });
   }
-
   async function blobToB64(b){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onloadend=()=>res(String(fr.result).split(',')[1]); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(b); }); }
 
+  // ---- Continuous loop (half-duplex)
   async function listenLoop(){
     while(isOn){
       try{
-        if(isSpeaking) { await new Promise(r=>setTimeout(r,60)); continue; }
+        if(isSpeaking){ await new Promise(r=>setTimeout(r,60)); continue; }
         await ensureAudio();
         const r=await startRecorder();
         const heard=await waitUtterance(r);
@@ -177,8 +215,8 @@
         if(!isOn) break;
         if(!heard) continue;
 
-        // soft capture beep to signal “I heard that”
-        try{ earcon.src = CAPTURE_BEEP; await earcon.play().catch(()=>{}); }catch{}
+        // capture earcon
+        try{ earcon.src = EARCON_CAPTURE; await earcon.play().catch(()=>{}); }catch{}
 
         const b64=await blobToB64(heard);
         const code=localStorage.getItem(LS_CODE)||'';
@@ -203,59 +241,69 @@
 
       }catch(e){
         if(e && e.name==='AbortError'){ /* ignore */ }
-        else { setState('error'); toast(String(e.message||e)); await new Promise(r=>setTimeout(r,300)); setState(isOn?'listening':'idle'); }
+        else { setState('error'); toast(String(e.message||e)); await new Promise(r=>setTimeout(r,280)); setState(isOn?'listening':'idle'); }
       }
     }
   }
 
-  // Mic toggle
-  let tapLock=false;
+  // ---- Toggle
   mic.addEventListener('click', async ()=>{
     if(tapLock) return; tapLock=true; setTimeout(()=>tapLock=false,180);
 
-    if(isSpeaking){ speaker.pause(); return; } // interrupt speech
+    // deny overlay from blocking clicks if we can see mic
+    if(getComputedStyle(gate).display!=='none') { showGate(); return; }
 
-    if(!localStorage.getItem(LS_CODE)){ showGate(); return; }
+    if(isSpeaking){ speaker.pause(); return; } // interrupt
+
+    const code = localStorage.getItem(LS_CODE);
+    if(!code){ showGate(); return; }
 
     if(!isOn){
-      // ON: request mic permission FIRST, then intro (once), then continuous listen
-      isOn=true;
-      await primeAudioOnce();
-      await promptMicOnce();          // guarantees the permission prompt on first tap
-      setState('speaking');           // immediate visual feedback
+      // ON: prime, permission, on-earcon, intro (once), then loop
+      isOn=true; mic.setAttribute('aria-pressed','true');
+      try{
+        await primeAudioOnce();
+        await promptMicOnce();               // guarantees permission prompt on first tap
+      }catch(e){
+        isOn=false; mic.setAttribute('aria-pressed','false'); setState('error'); toast('Microphone permission is required'); return;
+      }
 
-      const code=localStorage.getItem(LS_CODE);
+      // on-earcon to show we're alive
+      try{ earcon.src = EARCON_ON; await earcon.play().catch(()=>{}); }catch{}
+      setState('speaking');                  // immediate visual
+
       const introKey=LS_INTRO_PREFIX+code;
       if(!localStorage.getItem(introKey)){
         try{
           const r=await fetch(API_VOICE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,intro:true})});
           const j=await r.json(); if(j.audio) await playAudio(j.audio);
           localStorage.setItem(introKey,'1');
-        }catch(e){ /* intro failed — keep going */ }
+        }catch{ /* ignore intro failure */ }
       }
       setState('listening');
       listenLoop();
     } else {
       // OFF
-      isOn=false; abortInFlight(); stopRecorder(); setState('idle');https://app.netlify.com/projects/noraamp/overview
+      isOn=false; mic.setAttribute('aria-pressed','false');
+      abortInFlight(); stopRecorder(); setState('idle');
     }
-  });
+  }, {passive:true});
 
-  // Uploads (optional)
-  uploadFab.onclick = ()=> fileInput.click();
-  fileInput.onchange = async ()=>{
+  // ---- Uploads (top-right)
+  uploadFab.addEventListener('click', ()=> fileInput.click(), {passive:true});
+  fileInput.addEventListener('change', async ()=>{
     const files=[...(fileInput.files||[])].filter(f=>/pdf$/i.test(f.type));
     if(!files.length){ toast('PDFs only'); return; }
     const code=localStorage.getItem(LS_CODE)||'';
     for(const f of files){
       const b64=await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onloadend=()=>res(String(fr.result).split(',')[1]); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(f); });
-      const r=await fetch('/.netlify/functions/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,name:f.name,data:b64})});
+      const r=await fetch(API_UPLOAD,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,name:f.name,data:b64})});
       const j=await r.json(); if(j.error) toast('Upload failed: '+j.error); else toast('Uploaded '+f.name);
     }
     fileInput.value='';
-  };
+  });
 
-  // surfacing errors
+  // surface runtime exceptions
   window.addEventListener('error', e=> toast(e.message||'error'));
   window.addEventListener('unhandledrejection', e=> { const m=String(e.reason||''); if(!/AbortError/i.test(m)) toast(m); });
 })();
