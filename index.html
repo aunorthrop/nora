@@ -1,271 +1,429 @@
-<!-- only the <script> block changed; keep your existing HTML/CSS above -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Nora — Voice-first team updates</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    background:#0f1115;color:#e9eef6;display:flex;align-items:center;justify-content:center;
+    font-family:-apple-system,BlinkMacSystemFont,Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;
+    -webkit-user-select:none;user-select:none;touch-action:manipulation;
+  }
+  /* Mic button */
+  .voice-button{
+    width:160px;height:160px;border:none;border-radius:32px;background:#151821;color:#d8e0f0;
+    box-shadow:0 8px 28px rgba(0,0,0,.35), inset 0 -3px 0 rgba(255,255,255,.06);
+    cursor:pointer;position:relative;transition:transform .06s ease, box-shadow .06s ease, background .15s ease, color .15s ease;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .voice-button:active,.voice-button.pressed{transform:scale(.98);box-shadow:inset 0 6px 16px rgba(0,0,0,.35),0 2px 6px rgba(0,0,0,.25)}
+  .voice-button.idle{background:#151821;color:#d8e0f0}
+  .voice-button.listening{background:#1b5fff;color:#fff;box-shadow:0 0 0 4px rgba(27,95,255,.25), 0 8px 28px rgba(0,0,0,.4)}
+  .voice-button.thinking{background:#ffd43b;color:#1b1b1b}
+  .voice-button.speaking{background:#13c26b;color:#fff}
+  .voice-button.error{background:#ff4d4f;color:#fff}
+  .mic-icon{width:36px;height:36px;fill:currentColor}
+
+  /* Subscribe (top-left) */
+  .buy-btn{
+    position:fixed;top:14px;left:14px;z-index:3000;padding:10px 14px;border-radius:12px;border:none;
+    background:#222;color:#fff;font:500 14px/1 system-ui,-apple-system,Inter,Segoe UI,Roboto,Arial,sans-serif;
+    text-decoration:none;box-shadow:0 6px 18px rgba(0,0,0,.25);pointer-events:auto
+  }
+  .buy-btn:active{transform:scale(.98)}
+
+  /* Upload (+) top-right */
+  .plus{position:fixed;top:14px;right:14px;z-index:3000}
+  .plus-btn{
+    width:44px;height:44px;border:none;border-radius:12px;background:#1b5fff;color:#fff;cursor:pointer;
+    box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:24px;line-height:44px;text-align:center
+  }
+  .plus-btn:active{transform:scale(.98)}
+
+  /* Modal shell */
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:20px;z-index:4000}
+  .modal.open{display:flex}
+  .card{background:#141821;border:1px solid rgba(255,255,255,.07);border-radius:16px;max-width:520px;width:100%;padding:18px;box-shadow:0 18px 55px rgba(0,0,0,.45)}
+  .row{display:flex;gap:10px;margin-top:8px;align-items:center}
+  .file-choose{display:inline-block}
+  .file-choose input{display:none}
+  .file-choose label{
+    display:inline-block;background:#242936;color:#e9eef6;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer
+  }
+  .btn{background:#242936;color:#e9eef6;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer}
+  .btn:active{transform:scale(.98)}
+  input[type=text]{flex:1;background:#0e1219;border:1px solid rgba(255,255,255,.08);border-radius:10px;color:#e9eef6;padding:10px 12px;font-size:14px}
+  .list{margin-top:12px;max-height:240px;overflow:auto;border-top:1px solid rgba(255,255,255,.06);padding-top:10px}
+  .item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)}
+  .meta{opacity:.85;font-size:13px}
+  .bar{height:8px;background:#242936;border-radius:8px;overflow:hidden;margin-top:8px}
+  .fill{height:100%;width:0;background:#1b5fff;transition:width .2s}
+  .chk{margin-left:8px;color:#13c26b;font-size:14px}
+
+  /* Tiny error toast so a JS crash won’t render a blank page */
+  .toast{position:fixed;bottom:12px;left:12px;background:#ff4d4f;color:#fff;padding:8px 10px;border-radius:10px;
+    font-size:12px;box-shadow:0 6px 18px rgba(0,0,0,.3);display:none;z-index:5000;max-width:80vw;white-space:pre-wrap}
+</style>
+</head>
+<body>
+
+<a class="buy-btn" href="https://buy.stripe.com/14A14ng1E3Gn4BmceI5sA0b" target="_blank" rel="noopener">Subscribe – $10/mo</a>
+
+<div class="plus"><button class="plus-btn" id="openUpload" aria-label="Upload files">＋</button></div>
+
+<button id="voiceBtn" class="voice-button idle" aria-label="Press to talk">
+  <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c1.66 0 3 1.34 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/>
+  </svg>
+</button>
+
+<!-- Upload modal -->
+<div class="modal" id="uploadModal" aria-hidden="true">
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div class="meta" style="opacity:.9">Files</div>
+      <button class="btn" id="closeUpload">Close</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <div class="file-choose">
+        <input id="fileInput" type="file" multiple accept=".pdf,.txt,.md,.markdown"/>
+        <label for="fileInput">Choose files</label>
+      </div>
+    </div>
+    <div id="uploadArea"></div>
+    <div class="list" id="fileList"></div>
+  </div>
+</div>
+
+<!-- Team code modal -->
+<div class="modal" id="codeModal" aria-hidden="true">
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div class="meta" style="opacity:.9">Enter team code</div>
+      <button class="btn" id="closeCode">Close</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <input id="teamCode" type="text" placeholder="e.g. NORA-ABCD-1234 or TEAM-NORA"/>
+      <button class="btn" id="saveCode">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
 <script>
-(() => {
-  const DEMO_CODE = 'TEAM-NORA';
-  const STORAGE_KEY = 'nora_business_code';
-  const ADMIN_ARM_KEY = 'nora_admin_armed';
-
-  function getBiz(){ return localStorage.getItem(STORAGE_KEY) || ""; }
-  function setBiz(v){ localStorage.setItem(STORAGE_KEY, String(v||"").trim()); }
-  function isAdminArmed(){ return localStorage.getItem(ADMIN_ARM_KEY) === '1'; }
-  function armAdmin(){ localStorage.setItem(ADMIN_ARM_KEY, '1'); }
-  function disarmAdmin(){ localStorage.removeItem(ADMIN_ARM_KEY); }
-
-  // (If you still want the demo code auto-set, leave this line ON.
-  //  If you want to force real codes only, comment it out.)
-  if (!getBiz()) { setBiz(DEMO_CODE); }
-
-  const voiceBtn = document.getElementById('voiceBtn');
-  const openUpload = document.getElementById('openUpload');
-  const uploadModal = document.getElementById('uploadModal');
-  const closeUpload = document.getElementById('closeUpload');
-  const fileInput = document.getElementById('fileInput');
-  const uploadArea = document.getElementById('uploadArea');
-  const fileList = document.getElementById('fileList');
-
-  const codeModal = document.getElementById('codeModal');
-  const teamCodeInput = document.getElementById('teamCode');
-  const saveCodeBtn = document.getElementById('saveCode');
-  const closeCodeBtn = document.getElementById('closeCode');
-
-  function showModal(m){ m.classList.add('open'); m.setAttribute('aria-hidden','false'); }
-  function hideModal(m){ m.classList.remove('open'); m.setAttribute('aria-hidden','true'); }
-
-  saveCodeBtn.addEventListener('click', () => { const v = teamCodeInput.value.trim(); if (!v) return; setBiz(v); hideModal(codeModal); });
-  closeCodeBtn.addEventListener('click', () => hideModal(codeModal));
-
-  // Long-press mic => open code modal
-  let pressTimer;
-  function startPress(){ clearTimeout(pressTimer); pressTimer = setTimeout(()=>{ teamCodeInput.value = getBiz(); showModal(codeModal); }, 1200); }
-  function cancelPress(){ clearTimeout(pressTimer); }
-  voiceBtn.addEventListener('touchstart', startPress, {passive:true});
-  voiceBtn.addEventListener('mousedown', startPress);
-  voiceBtn.addEventListener('touchend', cancelPress);
-  voiceBtn.addEventListener('mouseup', cancelPress);
-
-  // Upload modal
-  openUpload.addEventListener('click', () => { if (!getBiz()) { teamCodeInput.value = ""; showModal(codeModal); return; } showModal(uploadModal); renderFileList(); });
-  closeUpload.addEventListener('click', () => hideModal(uploadModal));
-
-  // Audio session
-  let isSession=false,isListening=false,isProcessing=false,isSpeaking=false;
-  let audioCtx, micStream, recorder, chunks=[];
-  let inflight, sessionId=null;
-  const speaker = new Audio(); speaker.preload="none"; speaker.playsInline=true;
-
-  function setState(cls){
-    voiceBtn.className = `voice-button ${cls}`;
-    const map = {
-      idle:'Press to talk', listening:'Listening — tap to stop', thinking:'Working…',
-      speaking:'Speaking — tap to interrupt', error:'Error — tap to retry'
-    };
-    voiceBtn.setAttribute('aria-label', map[cls] || 'Press to talk');
+(function(){
+  /* ---- crash guard so you never see a blank page ---- */
+  var toast = document.getElementById('toast');
+  function showErr(msg){
+    try{ toast.textContent = String(msg || 'Error'); toast.style.display='block'; }catch(e){}
+    console.error(msg);
   }
+  window.onerror = function(msg, src, line, col, err){ showErr(msg + (err && err.stack ? ('\\n' + err.stack) : '')); };
+  window.onunhandledrejection = function(ev){ try{ showErr(''+(ev.reason && ev.reason.stack ? ev.reason.stack : ev.reason)); }catch(e){} };
 
-  async function ensureAudio(){
-    if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-    if (audioCtx.state !== 'running') await audioCtx.resume();
-  }
-  function getPreferredMime(){
-    const isiOS=/iPad|iPhone|iPod/.test(navigator.userAgent);
-    const isSafari=/Safari/.test(navigator.userAgent)&&!/Chrome/.test(navigator.userAgent);
-    if(isiOS||isSafari){
-      if(MediaRecorder.isTypeSupported("audio/mp4;codecs=mp4a.40.2")) return "audio/mp4;codecs=mp4a.40.2";
-      if(MediaRecorder.isTypeSupported("audio/mp4")) return "audio/mp4";
-    } else {
-      if(MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) return "audio/webm;codecs=opus";
-      if(MediaRecorder.isTypeSupported("audio/webm")) return "audio/webm";
-    }
-    return "";
-  }
+  try{
+    /* ---- constants & storage ---- */
+    var DEMO_CODE = 'TEAM-NORA';
+    var STORAGE_KEY = 'nora_business_code';
+    var ADMIN_ARM_KEY = 'nora_admin_armed';
+    function getBiz(){ try{ return localStorage.getItem(STORAGE_KEY) || ""; }catch(e){ return ""; } }
+    function setBiz(v){ try{ localStorage.setItem(STORAGE_KEY, String(v||"").trim()); }catch(e){} }
+    function isAdminArmed(){ try{ return localStorage.getItem(ADMIN_ARM_KEY) === '1'; }catch(e){ return false; } }
+    function armAdmin(){ try{ localStorage.setItem(ADMIN_ARM_KEY, '1'); }catch(e){} }
+    function disarmAdmin(){ try{ localStorage.removeItem(ADMIN_ARM_KEY); }catch(e){} }
 
-  async function startListening(){
-    if (isListening || isProcessing) return;
-    isListening = true; setState('listening');
-    await ensureAudio();
+    /* Demo code on first load if none */
+    if (!getBiz()) setBiz(DEMO_CODE);
 
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true }, video:false });
-    const mime = getPreferredMime(); const opts={}; if(mime) opts.mimeType=mime;
-    recorder = new MediaRecorder(micStream, opts);
-    chunks=[]; recorder.ondataavailable = (e)=>{ if(e.data && e.data.size>0) chunks.push(e.data); };
-    recorder.onstop = processRecording;
-    recorder.start(120);
-  }
-  function stopListening(){
-    try{ if(recorder && recorder.state==='recording') recorder.stop(); }catch{}
-    try{ micStream?.getTracks().forEach(t=>t.stop()); }catch{}
-    isListening=false;
-  }
+    /* ---- dom ---- */
+    var voiceBtn = document.getElementById('voiceBtn');
+    var openUpload = document.getElementById('openUpload');
+    var uploadModal = document.getElementById('uploadModal');
+    var closeUpload = document.getElementById('closeUpload');
+    var fileInput = document.getElementById('fileInput');
+    var uploadArea = document.getElementById('uploadArea');
+    var fileList = document.getElementById('fileList');
 
-  async function processRecording(){
-    isListening=false; isProcessing=true; setState('thinking');
-    try{
-      const blob = new Blob(chunks,{ type:recorder?.mimeType||'audio/webm' }); chunks=[];
-      if (!blob.size) { isProcessing=false; setState('idle'); return; }
-      const b64 = await blobToBase64(blob);
-      inflight?.abort(); inflight = new AbortController();
+    var codeModal = document.getElementById('codeModal');
+    var teamCodeInput = document.getElementById('teamCode');
+    var saveCodeBtn = document.getElementById('saveCode');
+    var closeCodeBtn = document.getElementById('closeCode');
 
-      const payload = {
-        businessId: getBiz(),
-        sessionId,
-        mode: isAdminArmed() ? 'admin-armed' : 'normal',
-        audio: { data: b64, mime: blob.type }
+    function showModal(m){ m.classList.add('open'); m.setAttribute('aria-hidden','false'); }
+    function hideModal(m){ m.classList.remove('open'); m.setAttribute('aria-hidden','true'); }
+
+    saveCodeBtn.addEventListener('click', function(){ var v = (teamCodeInput.value||"").trim(); if (!v) return; setBiz(v); hideModal(codeModal); });
+    closeCodeBtn.addEventListener('click', function(){ hideModal(codeModal); });
+
+    /* Long-press mic => open code modal */
+    var pressTimer;
+    function startPress(){ clearTimeout(pressTimer); pressTimer = setTimeout(function(){ teamCodeInput.value = getBiz(); showModal(codeModal); }, 1200); }
+    function cancelPress(){ clearTimeout(pressTimer); }
+    voiceBtn.addEventListener('touchstart', startPress, {passive:true});
+    voiceBtn.addEventListener('mousedown', startPress);
+    voiceBtn.addEventListener('touchend', cancelPress);
+    voiceBtn.addEventListener('mouseup', cancelPress);
+
+    /* Upload modal */
+    openUpload.addEventListener('click', function(){ if (!getBiz()){ teamCodeInput.value=""; showModal(codeModal); return; } showModal(uploadModal); renderFileList(); });
+    closeUpload.addEventListener('click', function(){ hideModal(uploadModal); });
+
+    /* ---- audio session ---- */
+    var isSession=false,isListening=false,isProcessing=false,isSpeaking=false;
+    var audioCtx, micStream, recorder, chunks=[];
+    var inflight, sessionId=null;
+    var speaker = new Audio(); speaker.preload="none"; speaker.playsInline=true;
+
+    function setState(cls){
+      voiceBtn.className = 'voice-button ' + cls;
+      var map = {
+        idle:'Press to talk', listening:'Listening — tap to stop', thinking:'Working…',
+        speaking:'Speaking — tap to interrupt', error:'Error — tap to retry'
       };
+      voiceBtn.setAttribute('aria-label', map[cls] || 'Press to talk');
+    }
+    function getPreferredMime(){
+      var isiOS=/iPad|iPhone|iPod/.test(navigator.userAgent);
+      var isSafari=/Safari/.test(navigator.userAgent)&&!/Chrome/.test(navigator.userAgent);
+      if(isiOS||isSafari){
+        if(window.MediaRecorder && MediaRecorder.isTypeSupported('audio/mp4;codecs=mp4a.40.2')) return 'audio/mp4;codecs=mp4a.40.2';
+        if(window.MediaRecorder && MediaRecorder.isTypeSupported('audio/mp4')) return 'audio/mp4';
+      } else {
+        if(window.MediaRecorder && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) return 'audio/webm;codecs=opus';
+        if(window.MediaRecorder && MediaRecorder.isTypeSupported('audio/webm')) return 'audio/webm';
+      }
+      return '';
+    }
+    async function ensureAudio(){
+      if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+      if(audioCtx.state!=='running') await audioCtx.resume();
+    }
+    async function startListening(){
+      if(isListening||isProcessing) return;
+      isListening=true; setState('listening');
+      await ensureAudio();
+      micStream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:true }, video:false });
+      var mime = getPreferredMime(); var opts={}; if(mime) opts.mimeType=mime;
+      recorder = new MediaRecorder(micStream, opts);
+      chunks=[];
+      recorder.ondataavailable = function(e){ if(e.data && e.data.size>0) chunks.push(e.data); };
+      recorder.onstop = processRecording;
+      recorder.start(120);
+    }
+    function stopListening(){
+      try{ if(recorder && recorder.state==='recording') recorder.stop(); }catch(e){}
+      try{ if(micStream){ micStream.getTracks().forEach(function(t){ t.stop(); }); } }catch(e){}
+      isListening=false;
+    }
+    async function processRecording(){
+      isListening=false; isProcessing=true; setState('thinking');
+      try{
+        var blob = new Blob(chunks,{ type:(recorder && recorder.mimeType) ? recorder.mimeType : 'audio/webm' }); chunks=[];
+        if(!blob.size){ isProcessing=false; setState('idle'); return; }
+        var b64 = await blobToBase64(blob);
+        if(inflight && inflight.abort) inflight.abort(); inflight = new AbortController();
 
-      const resp = await fetch('/.netlify/functions/voice',{
+        var payload = {
+          businessId: getBiz(),
+          sessionId: sessionId,
+          mode: isAdminArmed() ? 'admin-armed' : 'normal',
+          audio: { data:b64, mime: blob.type }
+        };
+
+        var resp = await fetch('/.netlify/functions/voice', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(payload),
+          signal: inflight.signal
+        });
+        var data = {};
+        try{ data = await resp.json(); }catch(e){ data = {}; }
+
+        if(data && data.sessionId) sessionId = data.sessionId;
+
+        // control
+        if(data && data.control){
+          if(data.control.adminArmed) armAdmin();
+          if(data.control.adminDisarm) disarmAdmin();
+          if(data.control.requireCode){ teamCodeInput.value=""; showModal(codeModal); }
+        }
+
+        if(data && data.audio){
+          await play(data.audio);
+        }else{
+          setState('idle');
+        }
+
+        isProcessing=false;
+        if(isSession) startListening();
+      }catch(e){
+        isProcessing=false;
+        setState('error');
+        showErr(e && e.stack ? e.stack : e);
+      }
+    }
+    async function play(dataUrl){
+      try{
+        isSpeaking=true; setState('speaking');
+        speaker.src = dataUrl; await speaker.play();
+        await new Promise(function(r){ speaker.onended = r; });
+        isSpeaking=false; setState('idle');
+      }catch(e){
+        isSpeaking=false; setState('error'); showErr(e);
+      }
+    }
+    function blobToBase64(blob){
+      return new Promise(function(res,rej){
+        var r=new FileReader();
+        r.onloadend=function(){ try{ var s=String(r.result||''); res(s.split(',')[1]||''); }catch(e){ rej(e); } };
+        r.onerror=function(){ rej(r.error||new Error('readAsDataURL failed')); };
+        r.readAsDataURL(blob);
+      });
+    }
+    async function runBriefThenListen(){
+      try{
+        setState('thinking');
+        var r = await fetch('/.netlify/functions/brief', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ businessId:getBiz() }) });
+        var j = {}; try{ j = await r.json(); }catch(e){ j={}; }
+        if(j && j.audio) await play(j.audio);
+        await startListening();
+      }catch(e){ await startListening(); }
+    }
+
+    /* Toggle mic */
+    voiceBtn.addEventListener('click', async function(e){
+      e.preventDefault();
+      if(!getBiz()){ teamCodeInput.value=""; showModal(codeModal); return; }
+      if(!isSession){
+        isSession = true;
+        sessionId = 'sess_' + Date.now();
+        runBriefThenListen();
+      }else{
+        try{ if(isSpeaking){ speaker.pause(); speaker.currentTime=0; } }catch(e){}
+        isSpeaking=false;
+        stopListening(); isSession=false; setState('idle');
+      }
+    });
+
+    /* ==== uploads ==== */
+    fileInput.addEventListener('change', async function(){
+      var files = Array.from(fileInput.files || []);
+      if(!files.length) return;
+
+      for (var i=0;i<files.length;i++){
+        var file = files[i];
+        if(file.size > 10*1024*1024){ showProgress(file.name, 'Too large (max 10MB)', 0, true); continue; }
+        var slot = showProgress(file.name, 'Reading…', 0);
+        try{
+          var ext = (file.name.split('.').pop()||'').toLowerCase();
+          var textObj;
+          if(ext === 'pdf'){
+            updateProgress(slot, 8, 'Loading PDF engine…');
+            await ensurePdfJs();
+            textObj = await extractPdfText(file, function(p){ updateProgress(slot, p, 'Extracting…'); });
+          }else{
+            var t = await file.text();
+            textObj = { text: t };
+            updateProgress(slot, 60, 'Processing…');
+          }
+          updateProgress(slot, 70, 'Uploading…');
+          await uploadDoc(file.name, file.size, textObj.text);
+          updateProgress(slot, 100, 'Completed', true);
+        }catch(err){
+          updateProgress(slot, 0, 'Failed', true, true);
+          showErr(err && err.stack ? err.stack : err);
+        }
+      }
+      await renderFileList();
+      fileInput.value = '';
+    });
+
+    async function ensurePdfJs(){
+      if(window.pdfjsLib) return;
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.2.67/pdf.min.js');
+    }
+    function loadScript(src){
+      return new Promise(function(res,rej){
+        var s=document.createElement('script');
+        s.src=src; s.async=true; s.onload=res; s.onerror=function(){ rej(new Error('Failed to load ' + src)); };
+        document.head.appendChild(s);
+      });
+    }
+    async function extractPdfText(file, onProg){
+      onProg(12);
+      var buf = await file.arrayBuffer(); onProg(20);
+      var pdf = await window.pdfjsLib.getDocument({ data: buf }).promise; onProg(30);
+      var text = '';
+      for(var p=1;p<=pdf.numPages;p++){
+        var page = await pdf.getPage(p);
+        var cnt = await page.getTextContent();
+        var seg = cnt.items.map(function(it){ return it.str; }).join(' ');
+        text += seg + '\\n';
+        onProg(30 + Math.floor((p/pdf.numPages)*40));
+      }
+      return { text: text };
+    }
+
+    function showProgress(name, label, pct, done, error){
+      var wrap = document.createElement('div');
+      wrap.className = 'item';
+      wrap.innerHTML = '<div class="meta">'+escapeHtml(name)+'</div>\
+      <div style="flex:1;margin-left:10px">\
+        <div class="bar"><div class="fill" style="width:'+ (pct||0) +'%"></div></div>\
+        <div class="meta">'+label+(done ? (error ? '' : ' <span class="chk">✔</span>') : '')+'</div>\
+      </div>';
+      uploadArea.prepend(wwrap=wrap);
+      return wrap;
+    }
+    function updateProgress(slot, pct, label, done){
+      var fill = slot.querySelector('.fill'); if(fill) fill.style.width = (pct||0)+'%';
+      var metas = slot.querySelectorAll('.meta'); var meta = metas[metas.length-1];
+      if(meta && label) meta.innerHTML = label + (done ? ' <span class="chk">✔</span>' : '');
+    }
+    async function uploadDoc(name, size, text){
+      var r = await fetch('/.netlify/functions/files', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(payload),
-        signal: inflight.signal
+        body: JSON.stringify({ businessId:getBiz(), name:name, size:size, text:text })
       });
-      const data = await resp.json();
-      sessionId = data.sessionId || sessionId;
-
-      // React to control signals
-      if (data.control?.adminArmed) armAdmin();
-      if (data.control?.adminDisarm) disarmAdmin();
-      if (data.control?.requireCode) { teamCodeInput.value = ""; showModal(codeModal); }
-
-      if (data.audio){
-        await play(data.audio);
-      } else {
-        setState('idle');
-      }
-
-      isProcessing=false;
-      if (isSession) startListening();
-    }catch(e){
-      isProcessing=false;
-      setState('error');
-      console.log(e);
+      if(!r.ok) throw new Error('upload failed: '+r.status);
+      return r.json();
     }
-  }
-
-  async function play(dataUrl){
-    try{
-      isSpeaking=true; setState('speaking');
-      speaker.src = dataUrl; await speaker.play();
-      await new Promise(r => speaker.onended=r);
-      isSpeaking=false; setState('idle');
-    }catch{ isSpeaking=false; setState('error'); }
-  }
-
-  function blobToBase64(blob){
-    return new Promise((res,rej)=>{ const r=new FileReader(); r.onloadend=()=>res(String(r.result).split(",")[1]||""); r.onerror=()=>rej(r.error||new Error("readAsDataURL failed")); r.readAsDataURL(blob); });
-  }
-
-  async function runBriefThenListen(){
-    try{
-      setState('thinking');
-      const r = await fetch('/.netlify/functions/brief',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ businessId:getBiz() }) });
-      const j = await r.json();
-      if (j.audio) await play(j.audio);
-      await startListening();
-    }catch{ await startListening(); }
-  }
-
-  // Toggle mic
-  voiceBtn.addEventListener('click', async (e)=>{
-    e.preventDefault();
-    if (!getBiz()) { teamCodeInput.value = ""; showModal(codeModal); return; }
-    if (!isSession){
-      isSession = true;
-      sessionId = `sess_${Date.now()}`;
-      runBriefThenListen();
-    } else {
-      if (isSpeaking) { try{ speaker.pause(); speaker.currentTime=0; }catch{} isSpeaking=false; }
-      stopListening(); isSession=false; setState('idle');
-    }
-  });
-
-  // Uploads (unchanged)
-  const fileInputEl = document.getElementById('fileInput');
-  fileInputEl.addEventListener('change', async () => {
-    const files = Array.from(fileInputEl.files || []);
-    if (!files.length) return;
-    for (const file of files){
-      if (file.size > 10 * 1024 * 1024) { showProgress(file.name, "Too large (max 10MB)", 0, true); continue; }
-      const slot = showProgress(file.name, "Reading…", 0);
+    async function renderFileList(){
       try{
-        const { text } = await extractText(file, (p)=>updateProgress(slot, p));
-        updateProgress(slot, 70, "Uploading…");
-        await uploadDoc(file.name, file.size, text);
-        updateProgress(slot, 100, "Completed", true);
-      }catch(err){
-        updateProgress(slot, 0, "Failed", true, true);
-        console.log(err);
-      }
+        var r = await fetch('/.netlify/functions/files?businessId=' + encodeURIComponent(getBiz()));
+        var j = {}; try{ j = await r.json(); }catch(e){ j={}; }
+        var docs = j.docs || [];
+        fileList.innerHTML = docs.length
+          ? docs.map(function(d){
+              var kb = Math.round((d.size||0)/1024);
+              return '<div class="item">\
+                <div class="meta">'+escapeHtml(d.name)+' <span style="opacity:.6;font-size:12px">('+kb+' KB)</span></div>\
+                <button class="btn" data-id="'+escapeHtml(d.id)+'">Remove</button>\
+              </div>';
+            }).join('')
+          : '<div class="meta" style="opacity:.75">No files uploaded yet.</div>';
+        var btns = fileList.querySelectorAll('button[data-id]');
+        for(var i=0;i<btns.length;i++){
+          btns[i].onclick = (function(b){
+            return async function(){
+              await fetch('/.netlify/functions/files?businessId='+encodeURIComponent(getBiz())+'&id='+encodeURIComponent(b.getAttribute('data-id')), { method:'DELETE' });
+              renderFileList();
+            };
+          })(btns[i]);
+        }
+      }catch(e){ /* don’t crash UI */ }
     }
-    await renderFileList();
-    fileInputEl.value = "";
-  });
+    function escapeHtml(s){ return String(s||"").replace(/[&<>"']/g, function(m){ return ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" })[m]; }); }
 
-  async function extractText(file, onProg){
-    const ext = (file.name.split('.').pop()||"").toLowerCase();
-    if (ext === "pdf"){
-      onProg(10);
-      const buf = await file.arrayBuffer(); onProg(20);
-      const pdf = await pdfjsLib.getDocument({ data: buf }).promise; onProg(30);
-      let text = "";
-      for (let i=1;i<=pdf.numPages;i++){
-        const page = await pdf.getPage(i);
-        const cnt = await page.getTextContent();
-        text += cnt.items.map(it => it.str).join(" ") + "\n";
-        onProg(30 + Math.floor((i/pdf.numPages)*40));
-      }
-      return { text };
-    } else {
-      const t = await file.text();
-      onProg(60);
-      return { text: t };
-    }
+  }catch(e){
+    showErr(e && e.stack ? e.stack : e);
   }
-  function showProgress(name, label, pct=0, done=false, error=false){
-    const wrap = document.createElement('div');
-    wrap.className = 'item';
-    wrap.innerHTML = `
-      <div class="meta">${escapeHtml(name)}</div>
-      <div style="flex:1;margin-left:10px">
-        <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
-        <div class="meta">${label}${done ? (error ? '' : ' <span class="chk">✔</span>') : ''}</div>
-      </div>`;
-    uploadArea.prepend(wrap);
-    return wrap;
-  }
-  function updateProgress(slot, pct, label, done=false){
-    const fill = slot.querySelector('.fill');
-    if (fill) fill.style.width = `${pct}%`;
-    const metas = slot.querySelectorAll('.meta');
-    const meta = metas[metas.length-1];
-    if (meta && label) meta.innerHTML = `${label}${done ? ' <span class="chk">✔</span>' : ''}`;
-  }
-  async function uploadDoc(name, size, text){
-    const r = await fetch('/.netlify/functions/files',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ businessId:getBiz(), name, size, text })
-    });
-    if (!r.ok) throw new Error('upload failed');
-    return r.json();
-  }
-  async function renderFileList(){
-    const r = await fetch('/.netlify/functions/files?businessId=' + encodeURIComponent(getBiz()));
-    const j = await r.json();
-    const docs = j.docs || [];
-    fileList.innerHTML = docs.length
-      ? docs.map(d => `
-        <div class="item">
-          <div class="meta">${escapeHtml(d.name)} <span style="opacity:.6;font-size:12px">(${Math.round(d.size/1024)} KB)</span></div>
-          <button class="btn" data-id="${d.id}">Remove</button>
-        </div>`).join('')
-      : '<div class="meta" style="opacity:.75">No files uploaded yet.</div>';
-    fileList.querySelectorAll('button[data-id]').forEach(btn=>{
-      btn.onclick = async () => {
-        await fetch('/.netlify/functions/files?businessId='+encodeURIComponent(getBiz())+'&id='+encodeURIComponent(btn.dataset.id), { method:'DELETE' });
-        renderFileList();
-      };
-    });
-  }
-  function escapeHtml(s){ return String(s||"").replace(/[&<>"']/g, m=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[m])); }
 })();
 </script>
+</body>
+</html>
