@@ -1,18 +1,22 @@
 import {
-  adminState, isAdmin, setAwait, getAwait, enterAdmin, exitAdmin, setPass, hasPass, checkPass,
   addDirective, listDirectives, removeLastDirective, removeDirectiveContaining, clearDirectives,
-  addUpdate, addStatic, removeLast, removeContaining, clearAll, searchRelevant, snapshot
+  addUpdate, addStatic, removeLast, removeContaining, clearAll,
+  searchRelevant, snapshot, getSettings, setAdminPass
 } from "./_shared/store.js";
 
 const OPENAI_ROOT = "https://api.openai.com/v1";
 const CHAT_MODEL = (() => {
   const fallback = "gpt-4o-mini";
   const m = (process.env.OPENAI_MODEL || "").trim();
-  const banned = ["gpt-5-thinking","gpt5","thinking","demo"];
-  return !m || banned.includes(m.toLowerCase()) ? fallback : m;
+  return m || fallback;
 })();
 const STT_MODEL = "whisper-1";
-const DEFAULT_TONE = (process.env.DEFAULT_TONE || "neutral").toLowerCase();
+const OPENAI_TTS_VOICE = (process.env.OPENAI_TTS_VOICE || "shimmer"); // high-pitched/funky
+const DEFAULT_TONE     = (process.env.DEFAULT_TONE || "neutral").toLowerCase();
+
+const MAX_TURNS = 30;
+const memoryStore = new Map();  // transcript history (optional)
+const sessionState = new Map(); // admin mode per session
 
 const hdrs = {
   "Content-Type":"application/json",
@@ -25,123 +29,116 @@ const hdrs = {
 export const handler = async (event) => {
   try{
     if (event.httpMethod === "OPTIONS") return { statusCode:200, headers:hdrs, body: JSON.stringify({ ok:true }) };
-    if (event.httpMethod === "GET")     return { statusCode:200, headers:hdrs, body: JSON.stringify({ message:"Nora OK", ts:new Date().toISOString(), store:snapshot() }) };
+    if (event.httpMethod === "GET")     return { statusCode:200, headers:hdrs, body: JSON.stringify({ message:"Nora OK", ts:new Date().toISOString() }) };
     if (event.httpMethod !== "POST")    return { statusCode:405, headers:hdrs, body: JSON.stringify({ error:"Method Not Allowed" }) };
     if (!process.env.OPENAI_API_KEY)    return { statusCode:500, headers:hdrs, body: JSON.stringify({ error:"OPENAI_API_KEY not configured" }) };
 
     const body = JSON.parse(event.body || "{}");
-    const { businessId, sessionId, audio, memoryShadow } = body;
-    if (!businessId || !sessionId || !audio?.data || !audio?.mime)
-      return { statusCode:400, headers:hdrs, body: JSON.stringify({ error:"Missing required information" }) };
+    const { businessId, sessionId, audio } = body;
+    if (!businessId) return reply(400, { error:"Missing businessId" });
+    if (!audio?.data || !audio?.mime) return reply(400, { error:"Missing audio" });
+
+    const sid = sessionId || `session_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
 
     // 1) STT
-    const transcript = await transcribe(audio.data, audio.mime).catch(()=>"");
-    if (!transcript.trim()) {
-      const audioUrl = await ttsSafe("I heard you, but the words were unclear—try again a touch closer to the mic.", "shimmer", 1.05).catch(()=>null);
-      return reply(200, { sessionId, response:"unclear", audio:audioUrl, maxSpeakMs:4500, memoryShadow:{} });
-    }
-    const lower = transcript.toLowerCase();
+    const transcript = await transcribe(audio.data, audio.mime).catch(()=> "");
+    if (!transcript.trim()) return speakText(200, sid, businessId, "I heard you, but the words were unclear—try again a touch closer to the mic.", { tone:DEFAULT_TONE, max_speak_ms:5000 });
 
-    // 2) Admin mode activation & password flow
-    const awaitState = getAwait(sessionId);
-    if (awaitState === "await_password") {
-      const pass = extractAfter(lower, /^(?:admin\s+password\s+is|password\s+is|password)\s*/i);
-      if (pass) {
-        if (checkPass(pass)) {
-          setAwait(sessionId, null); enterAdmin(sessionId);
-          const audioUrl = await ttsSafe("Admin mode activated.", "shimmer", 1.05);
-          return reply(200, { sessionId, response:"admin_on", audio:audioUrl, maxSpeakMs:3000, memoryShadow:{} });
-        } else {
-          const audioUrl = await ttsSafe("That password didn’t match. Say it again, or say exit admin mode.", "shimmer", 1.05);
-          return reply(200, { sessionId, response:"bad_pass", audio:audioUrl, maxSpeakMs:5000, memoryShadow:{} });
-        }
-      }
-      const audioUrl = await ttsSafe("Please say your admin password, for example: admin password is …", "shimmer", 1.05);
-      return reply(200, { sessionId, response:"ask_pass", audio:audioUrl, maxSpeakMs:5000, memoryShadow:{} });
-    }
-    if (awaitState === "await_new_password") {
-      const newPass = extractAfter(lower, /^(?:new\s+password\s+is|password\s+is)\s*/i);
-      if (newPass) {
-        setPass(newPass); setAwait(sessionId, null); enterAdmin(sessionId);
-        const audioUrl = await ttsSafe("New admin password saved. Admin mode activated.", "shimmer", 1.05);
-        return reply(200, { sessionId, response:"new_pass_saved", audio:audioUrl, maxSpeakMs:4500, memoryShadow:{} });
-      }
-      const audioUrl = await ttsSafe("Say: new password is …", "shimmer", 1.05);
-      return reply(200, { sessionId, response:"ask_new_pass", audio:audioUrl, maxSpeakMs:4000, memoryShadow:{} });
-    }
+    logHistory(sid, { role:"user", content:transcript });
 
-    // Commands to enter/exit admin mode
-    if (/^activate\s+admin\s+mode\b/i.test(lower)) {
-      if (hasPass()) {
-        setAwait(sessionId, "await_password");
-        const audioUrl = await ttsSafe("Say your admin password to continue.", "shimmer", 1.05);
-        return reply(200, { sessionId, response:"need_pass", audio:audioUrl, maxSpeakMs:4000, memoryShadow:{} });
+    // 2) Route: admin mode vs employee
+    const state = ensureSession(sid);
+    let response;
+
+    // a) Activation + password handling
+    const lower = transcript.toLowerCase().trim();
+
+    if (/^activate\b.*admin\b.*mode\b/.test(lower)) {
+      const settings = getSettings(businessId);
+      if (settings.adminPass) {
+        state.awaitingPassword = true;
+        return speakText(200, sid, businessId, "Speak the admin password.", { tone:"serious", max_speak_ms:4000 });
       } else {
-        setAwait(sessionId, "await_new_password");
-        const audioUrl = await ttsSafe("No admin password set. Say: new password is …", "shimmer", 1.05);
-        return reply(200, { sessionId, response:"set_pass", audio:audioUrl, maxSpeakMs:4500, memoryShadow:{} });
+        state.awaitingNewPass = true;
+        return speakText(200, sid, businessId, "No admin password set. Say: “new password is …”.", { tone:"serious", max_speak_ms:5000 });
       }
-    }
-    if (/^exit\s+admin\s+mode\b/i.test(lower)) {
-      if (isAdmin(sessionId)) {
-        exitAdmin(sessionId);
-        const audioUrl = await ttsSafe("Admin mode off.", "shimmer", 1.05);
-        return reply(200, { sessionId, response:"admin_off", audio:audioUrl, maxSpeakMs:3000, memoryShadow:{} });
-      }
-    }
-    if (/^change\s+admin\s+password\b/i.test(lower)) {
-      if (!isAdmin(sessionId)) {
-        const audioUrl = await ttsSafe("Activate admin mode first.", "shimmer", 1.05);
-        return reply(200, { sessionId, response:"need_admin", audio:audioUrl, maxSpeakMs:3500, memoryShadow:{} });
-      }
-      setAwait(sessionId, "await_new_password");
-      const audioUrl = await ttsSafe("Ready. Say: new password is …", "shimmer", 1.05);
-      return reply(200, { sessionId, response:"await_new", audio:audioUrl, maxSpeakMs:3500, memoryShadow:{} });
     }
 
-    // 3) Admin commands (when in admin mode)
-    if (isAdmin(sessionId)) {
-      const out = handleAdminCommands(lower, transcript);
-      const audioUrl = await ttsSafe(out.say, "shimmer", 1.05);
-      return reply(200, { sessionId, response:out.say, audio:audioUrl, maxSpeakMs:5500, memoryShadow:{} });
+    if (state.awaitingPassword) {
+      const ok = checkPasswordMatch(getSettings(businessId).adminPass, transcript);
+      state.awaitingPassword = false;
+      if (!ok) return speakText(200, sid, businessId, "That password didn’t match. Try “activate admin mode” again.", { tone:"serious", max_speak_ms:5000 });
+      state.isAdmin = true;
+      return speakText(200, sid, businessId, "Admin mode activated. You can say update, static, forget, or change admin password.", { tone:"serious", max_speak_ms:6000 });
     }
 
-    // 4) Employee Q&A against Director + Updates + Static + Docs
-    const sys = buildSystem();
-    const hits = searchRelevant(transcript, { kUpdates:3, kStatics:3, kDocs:2 });
-    const ctx = buildContext(hits);
+    if (/^change\b.*admin\b.*password\b/.test(lower)) {
+      if (!state.isAdmin) return speakText(200, sid, businessId, "You need admin mode to change the password. Say “activate admin mode”.", { tone:"serious", max_speak_ms:6000 });
+      state.awaitingNewPass = true;
+      return speakText(200, sid, businessId, "Ready. Say: “new password is …”.", { tone:"serious", max_speak_ms:5000 });
+    }
+
+    if (state.awaitingNewPass) {
+      const m = transcript.match(/new\s+password\s+is\s+(.+)/i);
+      const pass = (m ? m[1] : transcript).trim();
+      if (!pass || pass.length < 3) return speakText(200, sid, businessId, "Please say a longer password.", { tone:"serious", max_speak_ms:4000 });
+      setAdminPass(businessId, pass);
+      state.awaitingNewPass = false;
+      state.isAdmin = true;
+      return speakText(200, sid, businessId, "Admin password saved. You’re in admin mode.", { tone:"serious", max_speak_ms:5000 });
+    }
+
+    if (/^exit\b.*admin\b.*mode\b/.test(lower)) {
+      state.isAdmin = false;
+      return speakText(200, sid, businessId, "Exiting admin mode.", { tone:"neutral", max_speak_ms:3000 });
+    }
+
+    // b) Admin CRUD (only if admin)
+    if (state.isAdmin) {
+      const out = handleAdminCRUD(businessId, transcript);
+      if (out) return speakText(200, sid, businessId, out, { tone:"serious", max_speak_ms:7000 });
+      // fallthrough to normal Q&A if nothing matched
+    }
+
+    // c) Employee Q&A (or admin asking a question): director > updates > static > general
+    const hits = searchRelevant(businessId, transcript, { kUpdates:3, kStatics:3 });
+    const sys = buildSystemPrompt(businessId);
+    const context = buildContext(hits);
     const messages = [
-      { role:"system", content: sys + `\n\nCONTEXT (Director/Updates/Static/Docs):\n${ctx}` },
+      { role:"system", content: sys + `\n\nCONTEXT (from business data):\n${context}` },
+      ...getHistory(sid).map(m=>({ role:m.role, content:m.content })).slice(-MAX_TURNS*2),
       { role:"user", content: transcript }
     ];
+
     const out = await chatJSON(messages).catch(()=>({
       say:"I hit a snag. Mind asking that again?",
       tone:DEFAULT_TONE, can_interrupt:true, max_speak_ms:4500,
-      confidence:0.6, receipt:null, interrupt_now:false, interrupt_reason:null, follow_up:null, humor_level:0.0
+      confidence:0.6, receipt:null, interrupt_now:false, interrupt_reason:null, follow_up:null, humor_level:0.0, save_note:null
     }));
-    const sayNow = out.interrupt_now && out.follow_up ? out.follow_up : out.say;
-    const audioUrl = await ttsSafe(sayNow, "shimmer", 1.05).catch(()=>null);
-    return reply(200, {
-      sessionId, response:sayNow, audio:audioUrl, maxSpeakMs:Number(out.max_speak_ms||6500),
-      memoryShadow:{}
-    });
+
+    let sayNow = out.say;
+    if (out.interrupt_now && out.follow_up) sayNow = out.follow_up;
+    else if (out.receipt && out.receipt.trim()) sayNow = `${sayNow.trim()}  ${out.receipt.trim()}`;
+
+    logHistory(sid, { role:"assistant", content:sayNow });
+    return speakText(200, sid, businessId, sayNow, out);
 
   }catch(err){
-    console.error("voice error:", err);
+    console.error("voice handler error:", err);
     return { statusCode:500, headers:hdrs, body: JSON.stringify({ error:`Internal server error: ${err.message}` }) };
   }
 };
 
-// ---------- Helpers ----------
+// ---------- Speech-to-Text ----------
 async function transcribe(b64, mime){
   const buf = Buffer.from(b64,"base64");
-  if(buf.length<300) return "";
+  if (buf.length < 300) return "";
   const fd = new FormData();
   fd.set("model", STT_MODEL);
   fd.set("language","en");
   fd.set("temperature","0.2");
-  fd.set("prompt","Business voice interface; user may pause or self-correct.");
-  const blob = new Blob([buf],{ type:mime||"application/octet-stream" });
+  fd.set("prompt","Conversational business updates; user may pause or self-correct.");
+  const blob = new Blob([buf],{ type:mime || "application/octet-stream" });
   fd.set("file", blob, "audio.webm");
   const r = await fetch(`${OPENAI_ROOT}/audio/transcriptions`,{
     method:"POST",
@@ -153,63 +150,60 @@ async function transcribe(b64, mime){
   return (j.text||"").trim();
 }
 
-function extractAfter(text, regex){
-  const m = text.match(regex);
-  if(!m) return null;
-  const after = text.slice(m[0].length).trim();
-  return after.replace(/[.?!]+$/, "").slice(0, 120);
+// ---------- Admin CRUD ----------
+function handleAdminCRUD(biz, original){
+  const lower = original.toLowerCase().trim();
+
+  const d = lower.match(/^(?:director|policy)\s*[:\-]?\s*(.+)$/i);
+  if (d) { addDirective(biz, d[1]); return `Director rule added: ${d[1]}`; }
+
+  const upd = lower.match(/^(?:update|announce|broadcast)\s*[:\-]?\s*(.+)$/i);
+  if (upd){ addUpdate(biz, original.slice(upd.index).replace(/^(?:update|announce|broadcast)\s*[:\-]?\s*/i,"")); return "Update saved."; }
+
+  const stat = lower.match(/^(?:static|note|remember)\s*[:\-]?\s*(.+)$/i);
+  if (stat){ addStatic(biz, original.slice(stat.index).replace(/^(?:static|note|remember)\s*[:\-]?\s*/i,"")); return "Saved to static information."; }
+
+  const forgetLast = lower.match(/^forget\s+last(?:\s+(update|static|note|directive))?$/i);
+  if (forgetLast){ const k=(forgetLast[1]||"").toLowerCase(); const n=removeLast(biz, k); return n? "Removed the last item." : "There wasn’t a last item to remove."; }
+
+  const forgetDir = lower.match(/^forget\s+directive\s+(.+)$/i);
+  if (forgetDir){ const n = removeDirectiveContaining(biz, forgetDir[1]); return n? `Removed ${n} directive${n>1?"s":""}.` : "No matching directives."; }
+
+  const forgetAny = lower.match(/^forget\s+(.+)$/i);
+  if (forgetAny){ const n = removeContaining(biz, forgetAny[1]); return n? `Removed ${n} item${n>1?"s":""}.` : "Nothing matched."; }
+
+  const resetDir = lower.match(/^(?:clear|reset)\s+directives$/i);
+  if (resetDir){ clearDirectives(biz); return "Cleared all directives."; }
+
+  const clear = lower.match(/^(?:clear|reset)\s+(?:all|everything)$/i);
+  if (clear){ clearAll(biz); return "Cleared all updates, static info, and directives."; }
+
+  return null;
 }
 
-function handleAdminCommands(lower, original){
-  // Director / Policy
-  const dir = original.match(/^(?:director|policy)\s*[:\-]?\s*(.+)$/i);
-  if (dir) { const content = dir[1].trim(); addDirective(content); return { say:`Director rule added: ${content}` }; }
-
-  const forgetLastDir = lower.match(/^forget\s+last\s+directive$/i);
-  if (forgetLastDir) { const n = removeLastDirective(); return { say: n ? "Removed the last directive." : "No directive to remove." }; }
-
-  const forgetDir = original.match(/^forget\s+directive\s+(.+)$/i);
-  if (forgetDir) { const n = removeDirectiveContaining(forgetDir[1].trim()); return { say: n ? `Removed ${n} directive${n>1?"s":""}.` : "No matching directives." }; }
-
-  const resetDir = lower.match(/^(clear|reset)\s+directives$/i);
-  if (resetDir) { clearDirectives(); return { say: "Cleared all directives." }; }
-
-  // Updates / Static
-  const upd = original.match(/^(?:update|announce|broadcast)\s*[:\-]?\s*(.+)$/i);
-  if (upd) { const c = upd[1].trim(); addUpdate(c); return { say:`Update saved: ${c}` }; }
-
-  const stat = original.match(/^(?:static|note|remember|long[-\s]*term)\s*[:\-]?\s*(.+)$/i);
-  if (stat) { const c = stat[1].trim(); addStatic(c); return { say:`Saved to static info: ${c}` }; }
-
-  const forgetLast = lower.match(/^forget\s+last(?:\s+(update|static|note))?$/i);
-  if (forgetLast) { const kind = (forgetLast[1]||"").toLowerCase(); const removed = removeLast(kind); return { say: removed ? "Removed the last item." : "There wasn’t a last item to remove." }; }
-
-  const forgetPhrase = original.match(/^forget\s+(.+)$/i);
-  if (forgetPhrase) { const n = removeContaining(forgetPhrase[1].trim()); return { say: n ? `Removed ${n} item${n>1?"s":""}.` : "Nothing matched." }; }
-
-  const clear = lower.match(/^(clear|reset)\s+(all|everything)$/i);
-  if (clear) { clearAll(); return { say: "Cleared all updates, static info, directives, and docs." }; }
-
-  return { say:"Admin ready. Say: “update: …”, “static: …”, or “director: …”. You can also say “forget …” or “clear all.”" };
-}
-
+// ---------- Q&A prompt ----------
 function buildContext(hits){
   const ups = hits.updates.map(u => `• UPDATE: ${u.text}`).join("\n");
   const sts = hits.statics.map(s => `• STATIC: ${s.text}`).join("\n");
-  const dcs = hits.docs.map(d => `• DOC (${d.name}): ${d.text.slice(0, 1000)}…`).join("\n");
-  return [ups, sts, dcs].filter(Boolean).join("\n");
+  return (ups || sts) ? [ups, sts].filter(Boolean).join("\n") : "No matching items.";
 }
 
-function buildSystem(){
-  const base = (process.env.NORA_SYSTEM_PROMPT || `
-You are Nora — a voice-first business assistant. Keep answers short. Priority:
-DIRECTOR > UPDATES > STATIC > general. Add tiny audible receipts when using 1–3.
-Interrupt only for unclear intent, missing info, safety, or off-track. Refuse med/legal/financial.
-`).trim();
+function buildSystemPrompt(biz){
+  const userPrompt = (process.env.NORA_SYSTEM_PROMPT || "").trim();
+  const base = userPrompt || `
+You are Nora: a voice-first assistant for teams. You speak briefly, clearly, and stay strictly within the business’s own info.
+Never remember personal details; do not build user profiles. You only use:
+1) DIRECTOR rules (highest priority),
+2) recent UPDATES,
+3) long-term STATIC information.
+If information conflicts, obey the higher layer. If you lack info, say so and invite the admin to add it via admin mode.
+You may interrupt only for: unclear intent, missing critical info, safety concerns, or the user going off-topic. Keep interruptions to one crisp sentence.
+End answers in 2–4 sentences. Provide tiny audible receipts when using Director/Update content (e.g., “Policy note” or “Today’s update”).
+`.trim();
 
-  const directives = listDirectives();
+  const directives = listDirectives(biz);
   const dirBlock = directives.length
-    ? "BUSINESS DIRECTOR RULES:\n" + directives.slice(0, 20).map(d => `- ${d.text}`).join("\n")
+    ? "BUSINESS DIRECTOR RULES (override everything else):\n" + directives.slice(0, 12).map(d => `- ${d.text}`).join("\n")
     : "BUSINESS DIRECTOR RULES: none set.";
 
   const contract = `
@@ -221,6 +215,7 @@ Return STRICT JSON ONLY with this exact shape:
   "max_speak_ms": number,
   "confidence": number,
   "receipt": string|null,
+  "save_note": string|null,
   "interrupt_now": boolean,
   "interrupt_reason": "unclear_intent"|"missing_info"|"safety"|"off_track"|null,
   "follow_up": string|null,
@@ -235,7 +230,7 @@ async function chatJSON(messages){
     method:"POST",
     headers:{ "Authorization":`Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type":"application/json" },
     body: JSON.stringify({
-      model: CHAT_MODEL, temperature:0.35, max_tokens:360,
+      model: CHAT_MODEL, temperature:0.35, max_tokens:320,
       response_format:{ type:"json_object" },
       messages
     })
@@ -252,25 +247,50 @@ async function chatJSON(messages){
       max_speak_ms: Math.max(2500, Math.min(12000, Number(out.max_speak_ms || 6500))),
       confidence: Math.max(0, Math.min(1, Number(out.confidence || 0.6))),
       receipt: out.receipt || null,
+      save_note: out.save_note || null,
       interrupt_now: !!out.interrupt_now,
       interrupt_reason: out.interrupt_reason || null,
       follow_up: out.follow_up || null,
       humor_level: Math.max(0, Math.min(1, Number(out.humor_level || 0)))
     };
   }catch{
-    return { say:"I’m here.", tone:DEFAULT_TONE, can_interrupt:true, max_speak_ms:6500, confidence:0.6, receipt:null, interrupt_now:false, interrupt_reason:null, follow_up:null, humor_level:0 };
+    return { say:"I’m here.", tone:DEFAULT_TONE, can_interrupt:true, max_speak_ms:6500, confidence:0.6, receipt:null, save_note:null, interrupt_now:false, interrupt_reason:null, follow_up:null, humor_level:0 };
   }
 }
 
-async function ttsSafe(text, voice="shimmer", speed=1.05){
-  const res = await fetch("https://api.openai.com/v1/audio/speech", {
-    method:"POST",
-    headers:{ "Authorization":`Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type":"application/json" },
-    body: JSON.stringify({ model:"tts-1", voice, input:polish(text), response_format:"mp3", speed })
+// ---------- TTS (OpenAI only) ----------
+async function ttsOpenAI(text, tone, speed=1.0){
+  const r = await fetch(`${OPENAI_ROOT}/audio/speech`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: "tts-1",          // you can switch to "tts-1-hd" if you want
+      voice: OPENAI_TTS_VOICE, // shimmer by default
+      input: polish(text),
+      speed: Math.max(0.7, Math.min(1.15, Number(speed) || 1.0)),
+      response_format: "mp3"
+    })
   });
-  if(!res.ok) throw new Error(`TTS ${res.status}: ${await res.text()}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  return `data:audio/mp3;base64,${buf.toString("base64")}`;
+  if (!r.ok) throw new Error(`TTS ${r.status}: ${await r.text()}`);
+  const b = Buffer.from(await r.arrayBuffer());
+  return `data:audio/mpeg;base64,${b.toString("base64")}`;
+}
+
+async function speakText(statusCode, sid, biz, say, meta){
+  const dataUrl = await ttsOpenAI(say, meta?.tone || DEFAULT_TONE, 1.0).catch(()=>null);
+  return reply(statusCode, {
+    sessionId: sid,
+    response: say,
+    audio: dataUrl || null,
+    ttsEngine: "openai-tts-1",
+    tone: meta?.tone || DEFAULT_TONE,
+    canInterrupt: !!meta?.can_interrupt,
+    maxSpeakMs: Number(meta?.max_speak_ms || 6500),
+    store: snapshot(biz)
+  });
 }
 
 function polish(t){
@@ -278,6 +298,24 @@ function polish(t){
   t = t.replace(/([.!?])\s+/g,"$1  ").replace(/,\s+/g,",  ");
   if (!/[.!?…]$/.test(t)) t+=".";
   return t.slice(0, 3600);
+}
+
+// ---------- Session/history ----------
+function ensureSession(sid){
+  if (!sessionState.has(sid)) sessionState.set(sid, { isAdmin:false, awaitingPassword:false, awaitingNewPass:false });
+  return sessionState.get(sid);
+}
+function logHistory(sid, msg){
+  const arr = memoryStore.get(sid) || [];
+  arr.push({ ...msg, ts:Date.now() });
+  memoryStore.set(sid, arr.slice(-MAX_TURNS*2));
+}
+function getHistory(sid){ return memoryStore.get(sid) || []; }
+
+function checkPasswordMatch(saved, utterance){
+  if (!saved) return false;
+  const norm = s => String(s||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+  return norm(saved) === norm(utterance);
 }
 
 function reply(statusCode, data){ return { statusCode, headers:hdrs, body: JSON.stringify(data) }; }
