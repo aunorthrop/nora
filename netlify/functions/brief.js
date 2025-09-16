@@ -1,4 +1,4 @@
-// Speaks a quick brief based on last BRIEF_WINDOW_HOURS updates + any long-term headlines
+// Speaks a quick brief + first-run onboarding if requested
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_ROOT = "https://api.openai.com/v1";
 const TTS_MODEL = "tts-1";
@@ -11,20 +11,32 @@ function now(){ return Date.now(); }
 
 export const handler = async (event) => {
   try {
-    const { businessId } = JSON.parse(event.body || "{}");
+    const body = JSON.parse(event.body || "{}");
+    const businessId = body.businessId;
+    const firstRun = !!body.firstRun;
+
     if (!isValidCode(businessId)) {
       return json({ error: "missing_or_bad_team_code", control: { requireCode: true } });
     }
+
     const team = mem.get(businessId) || { updates: [], longterm: [] };
     const cutoff = now() - BRIEF_WINDOW_HOURS * 3600 * 1000;
     const recent = team.updates.filter(u => (u.ts || 0) >= cutoff).map(u => u.text);
 
     let text;
-    if (recent.length) {
-      const bullets = recent.slice(-8).map(s => "• " + s).join("  ");
-      text = `Here’s the latest. ${bullets}`;
+    if (firstRun) {
+      // crisp onboarding, then context
+      const headline = recent.length
+        ? "Welcome to Nora. I’ll read today’s updates, then you can ask questions. If you’re the admin, just say “admin” to add or delete updates; say “long-term: …” for permanent info; say “done” when finished."
+        : "Welcome to Nora. If you’re the admin, say “admin” to add updates; say “long-term: …” for permanent info; say “done” when finished. Employees can ask “what’s new?” or any question covered by updates or files.";
+      const tail = recent.length
+        ? "Here’s what’s new. " + recent.slice(-8).map(s => "• " + s).join("  ")
+        : "There are no updates yet.";
+      text = headline + "  " + tail;
     } else {
-      text = "No new updates right now.";
+      text = recent.length
+        ? "Here’s the latest. " + recent.slice(-8).map(s => "• " + s).join("  ")
+        : "No new updates right now.";
     }
 
     const tts = await ttsSay(text);
