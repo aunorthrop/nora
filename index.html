@@ -33,6 +33,11 @@
   .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);
     background:#1f2330;color:#fff;padding:10px 14px;border-radius:10px;border:1px solid #2a2f44;
     box-shadow:0 8px 30px #0007;font-size:14px;z-index:50}
+
+  /* Debug strip */
+  .dbg{position:fixed;left:12px;bottom:12px;background:#0b0d13;border:1px solid #2a2f44;color:#cbd5e1;
+       font:12px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace; padding:8px 10px;border-radius:8px;opacity:.9;z-index:60}
+  .dbg b{color:#93c5fd}
 </style>
 </head>
 <body>
@@ -55,6 +60,8 @@
   <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c1.66 0 3 1.34 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/></svg>
 </button>
 
+<div id="dbg" class="dbg" style="display:none"></div>
+
 <script>
 (()=> {
   // DOM
@@ -62,6 +69,7 @@
   const gate = document.getElementById('gate');
   const codeIn = document.getElementById('teamCode');
   const enterBtn = document.getElementById('enterBtn');
+  const dbg = document.getElementById('dbg');
 
   // Endpoints
   const API_VOICE='/.netlify/functions/voice';
@@ -72,7 +80,7 @@
   const LS_INTRO_PREFIX='nora_intro_done_';
 
   // Intro text (guaranteed spoken via fallback on first tap)
-  const INTRO_TEXT = "Hi, I’m Nora. I’m on. If you’re the owner, say admin and tell me the updates—I'll remember them. Team members can ask what’s new or anything we’ve saved. Tap again to turn me off.";
+  const INTRO_TEXT = "Hi, I’m Nora. I’m on. If you’re the owner, say admin and give updates—I'll remember them. Team members can ask what’s new or anything we’ve saved. Tap again to turn me off.";
 
   // Audio
   const speaker=new Audio(); speaker.preload='none'; speaker.playsInline=true;
@@ -82,9 +90,15 @@
   let rec=null, media=null, chunks=[];
   let loopRunning=false, micPrimed=false, primed=false;
 
-  // Helpers
+  // Debug helpers
+  const qs = new URLSearchParams(location.search);
+  const DEBUG = qs.get('debug') === '1';
+  function log(...a){ if(DEBUG){ console.log('[NORA]',...a);} }
+  function showDbg(){ if(!DEBUG) return; dbg.style.display='block'; dbg.innerHTML =
+    `<div><b>on</b>: ${isOn} <b>speaking</b>: ${isSpeaking} <b>loop</b>: ${loopRunning}</div>
+     <div><b>micPrimed</b>: ${micPrimed} <b>primed</b>: ${primed}</div>`; }
   function toast(m){ const t=document.createElement('div'); t.className='toast'; t.textContent=m; document.body.appendChild(t); setTimeout(()=>{try{t.remove();}catch{}},2600); }
-  function setState(s){ mic.className='mic '+s; }
+  function setState(s){ mic.className='mic '+s; showDbg(); }
   function showGate(){ gate.classList.add('visible'); }
   function hideGate(){ gate.classList.remove('visible'); }
   function normCode(s){ const t=String(s||'').replace(/[^0-9]/g,'').slice(0,8); return t.length===8? t.slice(0,4)+'-'+t.slice(4):''; }
@@ -108,22 +122,33 @@
     const b=audioCtx.createBuffer(1,1,audioCtx.sampleRate);
     const s=audioCtx.createBufferSource(); s.buffer=b; s.connect(audioCtx.destination); s.start(0);
     try{ speaker.src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="; await speaker.play(); speaker.pause(); speaker.currentTime=0; }catch{}
-    primed=true;
+    primed=true; log('primed'); showDbg();
   }
   async function askMicPermissionOnce(){
     if(micPrimed) return;
     const t = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
     t.getTracks().forEach(x=>x.stop());
-    micPrimed=true;
+    micPrimed=true; log('micPrimed'); showDbg();
   }
 
-  // Guaranteed speech fallback
+  // Guaranteed speech fallback (wait for voices if needed)
   async function speakFallback(text){
     try{
       if(!('speechSynthesis' in window)) return false;
-      const u=new SpeechSynthesisUtterance(String(text||""));
-      u.rate=0.98; u.pitch=1.05; u.volume=1.0;
-      return await new Promise(res=>{ u.onend=()=>res(true); u.onerror=()=>res(false); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); });
+      function speakNow() {
+        return new Promise(res=>{
+          const u=new SpeechSynthesisUtterance(String(text||""));
+          u.rate=0.95; u.pitch=1.05; u.volume=1.0;
+          u.onend=()=>res(true); u.onerror=()=>res(false);
+          window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
+        });
+      }
+      const haveVoices = window.speechSynthesis.getVoices().length>0;
+      if(haveVoices) return await speakNow();
+      return await new Promise(resolve=>{
+        let timer=setTimeout(async ()=>{ resolve(await speakNow()); }, 600);
+        window.speechSynthesis.onvoiceschanged = async ()=>{ clearTimeout(timer); resolve(await speakNow()); };
+      });
     }catch{ return false; }
   }
 
@@ -133,12 +158,14 @@
     try{
       if(dataUrl){
         speaker.pause(); speaker.currentTime=0; speaker.src=dataUrl;
-        await speaker.play();
+        await speaker.play(); log('playing server audio');
         await new Promise(res=>{ speaker.onended=res; speaker.onpause=res; });
       }else{
+        log('fallback speech:', fallbackText);
         await speakFallback(fallbackText || "Okay.");
       }
-    }catch{
+    }catch(e){
+      log('play error', e);
       await speakFallback(fallbackText || "Okay.");
     }
     isSpeaking=false; setState(isOn?'listening':'idle');
@@ -184,9 +211,8 @@
   }
 
   // Listen loop (single-run guard)
-  let loopRunning=false;
   async function listenLoop(){
-    if(loopRunning) return; loopRunning=true;
+    if(loopRunning) return; loopRunning=true; showDbg();
     while(isOn){
       try{
         if(isSpeaking){ await new Promise(r=>setTimeout(r,60)); continue; }
@@ -206,6 +232,7 @@
           method:'POST',headers:{'Content-Type':'application/json'},
           body:JSON.stringify({businessId:code,audio:{data:b64,mime:heard.type},role})
         });
+        log('server', ok, status, json);
 
         if(json.control?.requireCode){ isOn=false; setState('idle'); showGate(); toast('Enter your team code'); break; }
         if(json.control?.role){ localStorage.setItem(LS_ROLE, json.control.role); }
@@ -213,26 +240,25 @@
         if(ok){
           await playAudioOrText(json.audio || null, json.response || json.text || "Okay.");
         }else{
-          toast(`Server ${status||'error'}`); // still talk so it's never silent
-          await playAudioOrText(null, "I ran into an error, but I heard you.");
+          toast(`Server ${status||'error'}`);
+          await playAudioOrText(null, "I hit an error but I heard you.");
         }
 
       }catch(e){
         setState('error'); toast(String(e.message||'error')); await new Promise(r=>setTimeout(r,250)); setState(isOn?'listening':'idle');
       }
+      showDbg();
     }
-    loopRunning=false;
+    loopRunning=false; showDbg();
   }
 
   // Toggle
   mic.addEventListener('click', async ()=>{
     if(isSpeaking){ try{speaker.pause();}catch{} return; } // interrupt
-
     if(!localStorage.getItem(LS_CODE)){ showGate(); return; }
 
     if(!isOn){
-      isOn=true; mic.setAttribute('aria-pressed','true');
-
+      isOn=true; mic.setAttribute('aria-pressed','true'); showDbg();
       try{ await primeOnce(); await askMicPermissionOnce(); }
       catch(e){ isOn=false; mic.setAttribute('aria-pressed','false'); setState('error'); toast('Microphone permission is required'); return; }
 
@@ -241,24 +267,25 @@
       const introKey=LS_INTRO_PREFIX+code;
       if(!localStorage.getItem(introKey)){
         setState('speaking');
-        // speak immediately so the user hears something right now
         await speakFallback(INTRO_TEXT);
         localStorage.setItem(introKey,'1');
-        // (optional) warm the function but ignore result
-        fetch(API_VOICE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,intro:true})}).catch(()=>{});
+        // warm the function (ignore result)
+        fetch(API_VOICE+'?ping=1').catch(()=>{});
       }
-
       setState('listening');
       listenLoop();
     } else {
       isOn=false; mic.setAttribute('aria-pressed','false');
-      abortInFlight(); stopRecorder(); setState('idle');
+      abortInFlight(); stopRecorder(); setState('idle'); showDbg();
     }
   });
 
+  // Debug strip toggle via ?debug=1
+  if(DEBUG) showDbg();
+
   // Errors → on-screen
-  window.addEventListener('error', e=> toast(e.message||'error'));
-  window.addEventListener('unhandledrejection', e=> { const m=String(e.reason||''); if(!/AbortError/i.test(m)) toast(m); });
+  window.addEventListener('error', e=> { toast(e.message||'error'); log('window error', e); });
+  window.addEventListener('unhandledrejection', e=> { const m=String(e.reason||''); if(!/AbortError/i.test(m)) toast(m); log('rejection', e); });
 })();
 </script>
 </body>
