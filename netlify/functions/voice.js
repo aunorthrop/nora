@@ -9,10 +9,11 @@ const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || "shimmer";
 const UPDATES_TTL_HOURS  = Number(process.env.UPDATES_TTL_HOURS  || 168);
 const BRIEF_WINDOW_HOURS = Number(process.env.BRIEF_WINDOW_HOURS || 24);
 
+// in-memory per-team store (per function instance)
 const DB = globalThis.__NORA_TEAMS__ || (globalThis.__NORA_TEAMS__ = new Map());
 const now=()=>Date.now();
-function isCode(s){ return /^[0-9]{4}-[0-9]{4}$/.test(String(s||"")); }
 function team(id){ if(!DB.has(id)) DB.set(id,{updates:[],longterm:[],docs:[],lastSay:"",lastAdded:null}); return DB.get(id); }
+function isCode(s){ return /^[0-9]{4}-[0-9]{4}$/.test(String(s||"")); }
 const j=(b,s=200)=>({statusCode:s,headers:{"Content-Type":"application/json","Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"Content-Type"},body:JSON.stringify(b)});
 
 const ACK_UPDATE = ["Got it.", "Noted.", "Added.", "Okay—saved."];
@@ -23,64 +24,78 @@ export const handler = async (event)=>{
   if(event.httpMethod==="OPTIONS") return j({ok:true});
   try{
     const body = JSON.parse(event.body||"{}");
-    const businessId = body.businessId;
-    if(!isCode(businessId)) return j({error:"missing_or_bad_team_code",control:{requireCode:true}});
+    const code = body.businessId;
+    if(!isCode(code)) return j({error:"missing_or_bad_team_code",control:{requireCode:true}});
+
+    const state = team(code);
+
+    // ---------- INTRO path (no audio required) ----------
+    if(body.intro){
+      const text = introText();
+      return say(state, text, {control:{intro:true}});
+    }
 
     const role = String(body.role||"employee");
     const expectRole = !!body.expectRole;
     const audio = body.audio||{};
-    if(!audio.data || !audio.mime) return j({error:"no_audio"});
 
-    // --- STT (robust) ---
-    let transcript=""; try{ transcript = await transcribeRobust(audio.data, audio.mime); }
-    catch(e){ return j({error:`STT ${e.message||'failed'}`}); }
-    const raw=(transcript||"").trim(); if(!raw) return say(team(businessId),"I didn’t catch that. Try again.");
-    const lower=raw.toLowerCase();
-    const state=team(businessId);
-
-    // --- first run role capture ---
     if(expectRole){
-      const yes=/\b(yes|yeah|yep|i am|i'm|admin)\b/.test(lower);
-      const no =/\b(no|nope|not|employee|staff)\b/.test(lower);
+      const raw = String(body.text||"").toLowerCase();
+      const yes=/\b(yes|yeah|yep|i am|i'm|admin)\b/.test(raw);
+      const no =/\b(no|nope|not|employee|staff)\b/.test(raw);
       if(yes && !no) return say(state,"Admin mode set for this device.",{control:{role:"admin"}});
       if(no  && !yes) return say(state,"Okay—this device is employee.",{control:{role:"employee"}});
       return say(state,"Was that yes or no?",{control:{askRoleAgain:true}});
     }
 
-    // --- universal repeats ---
+    // must have audio for normal path
+    if(!audio.data || !audio.mime){
+      return say(state,"I’m listening—try again.");
+    }
+
+    // ---------- robust STT ----------
+    let transcript="";
+    try{ transcript = await transcribeRobust(audio.data, audio.mime); }
+    catch(e){ return say(state,"I couldn’t hear that—try again."); }
+    const raw = (transcript||"").trim();
+    if(!raw) return say(state,"I’m listening—try again.");
+
+    const lower=raw.toLowerCase();
+
+    // repeat last line
     if(/\b(repeat|say it again|one more time|repeat that|what about it)\b/.test(lower)){
       return state.lastSay ? say(state,state.lastSay) : say(state,"There’s nothing to repeat yet.");
     }
 
-    // --- “what did you just add / note / save” ---
+    // last added echo
     if(/\b(what (did|have) (you )?(just )?(add|note|save|store|log)(ed)?|what did i (just )?(add|say|note))\b/.test(lower)){
       if(state.lastAdded) return say(state, `You just saved: “${state.lastAdded.text}”.`);
       return say(state,"We haven’t saved anything yet.");
     }
 
-    // --- “what do you have stored / what do you know” summary ---
+    // memory snapshot
     if(/\b(what (do|d'you) (you )?(have|know|remember)|what'?s in (memory|store|storage)|show (me )?(memory|notes|updates))\b/.test(lower)){
       return say(state, buildHighlights(state));
     }
 
-    // --- EMPLOYEE quick updates ---
+    // quick employee updates
     if(role!=="admin" && /\b(what('?| i)s new|any updates|updates (today|for today))\b/.test(lower)){
       return say(state, whatsNewMsg(state));
     }
 
-    // --- ADMIN: classify vs Q&A ---
+    // ADMIN branch
     if(role==="admin"){
-      // If it looks like a question, treat as a query instead of saving
-      const looksQuestion = /[?]$/.test(raw) || /\b(what|when|where|who|why|how|which|do we|can we|should we)\b/i.test(raw);
-      if(looksQuestion){
+      // treat questions as Q&A
+      const looksQ = /[?]$/.test(raw) || /\b(what|when|where|who|why|how|which|do we|can we|should we)\b/i.test(raw);
+      if(looksQ){
         const ans = await answerFromMemory(state, raw);
         if(/I don’t have that yet/i.test(ans)){
-          return say(state, "I might not have that. Want me to save the answer you just gave, or add details now?");
+          return say(state,"I might not have that. Want me to save the details now?");
         }
         return say(state, ans);
       }
 
-      // delete / forget
+      // delete/forget
       if(/^(delete|remove|forget)\b/i.test(raw)){
         const tail = raw.replace(/^(delete|remove|forget)\b[:\-]?\s*/i,"").trim();
         if(!tail) return say(state,"Tell me what to delete.");
@@ -91,7 +106,7 @@ export const handler = async (event)=>{
         return say(state,"I didn’t find that.");
       }
 
-      // save: classify softly (no UX talk about “long-term” vs “update”)
+      // save (no jargon about “long-term”)
       const isLT = /(\bpermanent\b|\balways\b|\bpolicy\b|\bhandbook\b|\bprocedure\b|\bhours\b|\baddress\b|\bphone\b|\bsafety\b|\bmenu\b|\bforever\b|\bpersist\b)/i.test(raw)
                 || /^(remember|save|store|keep|log)\b/i.test(raw);
       const cleaned = raw.replace(/^(remember|save|store|keep|log)\b[:\-]?\s*/i,"").trim();
@@ -105,14 +120,17 @@ export const handler = async (event)=>{
       }
     }
 
-    // --- EMPLOYEE Q&A from memory ---
+    // EMPLOYEE Q&A
     const answer = await answerFromMemory(state, raw);
     return say(state, answer);
 
   }catch(e){ console.error(e); return j({error:"server_error"},500); }
 };
 
-// -------- helpers --------
+// ---- helpers ----
+function introText(){
+  return "Hi, I’m Nora. Admins can say “admin” and speak updates; I’ll remember them. Employees can ask “what’s new?” or any question about saved info. Tap the button again to turn me off.";
+}
 function prune(state){
   const cut=now()-UPDATES_TTL_HOURS*3600*1000;
   state.updates  = state.updates.filter(u=>(u.ts||0)>=cut).slice(-500);
@@ -136,7 +154,6 @@ function buildHighlights(state){
 function pick(a){ return a[Math.floor(Math.random()*a.length)] || a[0]; }
 
 async function answerFromMemory(state, question){
-  // include updates too (new)
   const pool=[...state.longterm.map(x=>({text:x.text})), ...state.docs.map(d=>({text:d.text})), ...state.updates.map(x=>({text:x.text}))];
   if(pool.length===0) return "I don’t have that yet.";
   const qset=new Set(tok(question));
