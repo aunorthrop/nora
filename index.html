@@ -27,14 +27,6 @@
   .voice-button.error{background:#ff4d4f;color:#fff}
   .mic-icon{width:36px;height:36px;fill:currentColor}
 
-  /* Subscribe (top-left) */
-  .buy-btn{
-    position:fixed;top:14px;left:14px;z-index:3000;padding:10px 14px;border-radius:12px;border:none;
-    background:#222;color:#fff;font:500 14px/1 system-ui,-apple-system,Inter,Segoe UI,Roboto,Arial,sans-serif;
-    text-decoration:none;box-shadow:0 6px 18px rgba(0,0,0,.25);pointer-events:auto
-  }
-  .buy-btn:active{transform:scale(.98)}
-
   /* Upload (+) top-right */
   .plus{position:fixed;top:14px;right:14px;z-index:3000}
   .plus-btn{
@@ -43,37 +35,41 @@
   }
   .plus-btn:active{transform:scale(.98)}
 
-  /* Modal shell */
+  /* Paywall / team-code gate */
+  .gate{position:fixed;inset:0;background:rgba(10,12,18,.92);display:flex;align-items:center;justify-content:center;padding:20px;z-index:5000}
+  .gate-card{background:#141821;border:1px solid rgba(255,255,255,.07);border-radius:16px;max-width:520px;width:100%;padding:20px;box-shadow:0 18px 55px rgba(0,0,0,.45)}
+  .h{font-weight:600;margin-bottom:6px}
+  .row{display:flex;gap:10px;margin-top:10px;align-items:center}
+  input[type=text]{flex:1;background:#0e1219;border:1px solid rgba(255,255,255,.08);border-radius:10px;color:#e9eef6;padding:12px 12px;font-size:14px}
+  .btn{background:#242936;color:#e9eef6;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer}
+  .btn:active{transform:scale(.98)}
+  .buy{background:#1b5fff;color:#fff}
+
+  /* Upload modal */
   .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:20px;z-index:4000}
   .modal.open{display:flex}
   .card{background:#141821;border:1px solid rgba(255,255,255,.07);border-radius:16px;max-width:520px;width:100%;padding:18px;box-shadow:0 18px 55px rgba(0,0,0,.45)}
-  .row{display:flex;gap:10px;margin-top:8px;align-items:center}
+  .meta{opacity:.85;font-size:13px}
   .file-choose{display:inline-block}
   .file-choose input{display:none}
+  /* NEW: lighter label color */
   .file-choose label{
-    display:inline-block;background:#242936;color:#e9eef6;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer
+    display:inline-block;background:#E6E9F2;color:#111;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer
   }
-  .btn{background:#242936;color:#e9eef6;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer}
-  .btn:active{transform:scale(.98)}
-  input[type=text]{flex:1;background:#0e1219;border:1px solid rgba(255,255,255,.08);border-radius:10px;color:#e9eef6;padding:10px 12px;font-size:14px}
   .list{margin-top:12px;max-height:240px;overflow:auto;border-top:1px solid rgba(255,255,255,.06);padding-top:10px}
   .item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)}
-  .meta{opacity:.85;font-size:13px}
   .bar{height:8px;background:#242936;border-radius:8px;overflow:hidden;margin-top:8px}
   .fill{height:100%;width:0;background:#1b5fff;transition:width .2s}
   .chk{margin-left:8px;color:#13c26b;font-size:14px}
 
-  /* Tiny error toast so a JS crash won’t render a blank page */
   .toast{position:fixed;bottom:12px;left:12px;background:#ff4d4f;color:#fff;padding:8px 10px;border-radius:10px;
-    font-size:12px;box-shadow:0 6px 18px rgba(0,0,0,.3);display:none;z-index:5000;max-width:80vw;white-space:pre-wrap}
+    font-size:12px;box-shadow:0 6px 18px rgba(0,0,0,.3);display:none;z-index:6000;max-width:80vw;white-space:pre-wrap}
 </style>
 </head>
 <body>
 
-<a class="buy-btn" href="https://buy.stripe.com/14A14ng1E3Gn4BmceI5sA0b" target="_blank" rel="noopener">Subscribe – $10/mo</a>
-
+<!-- mic button (only usable after a valid team code exists) -->
 <div class="plus"><button class="plus-btn" id="openUpload" aria-label="Upload files">＋</button></div>
-
 <button id="voiceBtn" class="voice-button idle" aria-label="Press to talk">
   <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
     <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c1.66 0 3 1.34 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/>
@@ -83,10 +79,7 @@
 <!-- Upload modal -->
 <div class="modal" id="uploadModal" aria-hidden="true">
   <div class="card">
-    <div class="row" style="justify-content:space-between">
-      <div class="meta" style="opacity:.9">Files</div>
-      <button class="btn" id="closeUpload">Close</button>
-    </div>
+    <div class="row" style="justify-content:space-between"><div class="meta">Files</div><button class="btn" id="closeUpload">Close</button></div>
     <div class="row" style="margin-top:12px">
       <div class="file-choose">
         <input id="fileInput" type="file" multiple accept=".pdf,.txt,.md,.markdown"/>
@@ -98,17 +91,16 @@
   </div>
 </div>
 
-<!-- Team code modal -->
-<div class="modal" id="codeModal" aria-hidden="true">
-  <div class="card">
-    <div class="row" style="justify-content:space-between">
-      <div class="meta" style="opacity:.9">Enter team code</div>
-      <button class="btn" id="closeCode">Close</button>
+<!-- Team-code paywall (always shown until a valid code is saved) -->
+<div class="gate" id="gate">
+  <div class="gate-card">
+    <div class="h">Join your team on Nora</div>
+    <div class="meta">Enter the 8-digit team code (####-####) you received after subscribing. Or subscribe now to create a new team.</div>
+    <div class="row">
+      <input id="teamCode" type="text" inputmode="numeric" pattern="[0-9]{4}-[0-9]{4}" placeholder="1234-5678"/>
+      <button class="btn" id="saveCode">Enter</button>
     </div>
-    <div class="row" style="margin-top:12px">
-      <input id="teamCode" type="text" placeholder="e.g. NORA-ABCD-1234 or TEAM-NORA"/>
-      <button class="btn" id="saveCode">Save</button>
-    </div>
+    <div class="row"><button class="btn buy" id="buyBtn">Subscribe – $10/mo</button></div>
   </div>
 </div>
 
@@ -116,18 +108,14 @@
 
 <script>
 (function(){
-  /* ---- crash guard so you never see a blank page ---- */
+  /* ---- crash guard ---- */
   var toast = document.getElementById('toast');
-  function showErr(msg){
-    try{ toast.textContent = String(msg || 'Error'); toast.style.display='block'; }catch(e){}
-    console.error(msg);
-  }
-  window.onerror = function(msg, src, line, col, err){ showErr(msg + (err && err.stack ? ('\\n' + err.stack) : '')); };
+  function showErr(msg){ try{ toast.textContent = String(msg||'Error'); toast.style.display='block'; }catch(e){} console.error(msg); }
+  window.onerror = function(msg, src, line, col, err){ showErr(msg + (err && err.stack ? ('\n' + err.stack) : '')); };
   window.onunhandledrejection = function(ev){ try{ showErr(''+(ev.reason && ev.reason.stack ? ev.reason.stack : ev.reason)); }catch(e){} };
 
   try{
-    /* ---- constants & storage ---- */
-    var DEMO_CODE = 'TEAM-NORA';
+    /* ---- storage ---- */
     var STORAGE_KEY = 'nora_business_code';
     var ADMIN_ARM_KEY = 'nora_admin_armed';
     function getBiz(){ try{ return localStorage.getItem(STORAGE_KEY) || ""; }catch(e){ return ""; } }
@@ -136,10 +124,12 @@
     function armAdmin(){ try{ localStorage.setItem(ADMIN_ARM_KEY, '1'); }catch(e){} }
     function disarmAdmin(){ try{ localStorage.removeItem(ADMIN_ARM_KEY); }catch(e){} }
 
-    /* Demo code on first load if none */
-    if (!getBiz()) setBiz(DEMO_CODE);
-
     /* ---- dom ---- */
+    var gate = document.getElementById('gate');
+    var teamCodeInput = document.getElementById('teamCode');
+    var saveCodeBtn = document.getElementById('saveCode');
+    var buyBtn = document.getElementById('buyBtn');
+
     var voiceBtn = document.getElementById('voiceBtn');
     var openUpload = document.getElementById('openUpload');
     var uploadModal = document.getElementById('uploadModal');
@@ -148,29 +138,19 @@
     var uploadArea = document.getElementById('uploadArea');
     var fileList = document.getElementById('fileList');
 
-    var codeModal = document.getElementById('codeModal');
-    var teamCodeInput = document.getElementById('teamCode');
-    var saveCodeBtn = document.getElementById('saveCode');
-    var closeCodeBtn = document.getElementById('closeCode');
+    function hasCode(){ return /^[0-9]{4}-[0-9]{4}$/.test(getBiz()); }
+    function updateGate(){ gate.style.display = hasCode() ? 'none' : 'flex'; }
+    updateGate();
 
-    function showModal(m){ m.classList.add('open'); m.setAttribute('aria-hidden','false'); }
-    function hideModal(m){ m.classList.remove('open'); m.setAttribute('aria-hidden','true'); }
-
-    saveCodeBtn.addEventListener('click', function(){ var v = (teamCodeInput.value||"").trim(); if (!v) return; setBiz(v); hideModal(codeModal); });
-    closeCodeBtn.addEventListener('click', function(){ hideModal(codeModal); });
-
-    /* Long-press mic => open code modal */
-    var pressTimer;
-    function startPress(){ clearTimeout(pressTimer); pressTimer = setTimeout(function(){ teamCodeInput.value = getBiz(); showModal(codeModal); }, 1200); }
-    function cancelPress(){ clearTimeout(pressTimer); }
-    voiceBtn.addEventListener('touchstart', startPress, {passive:true});
-    voiceBtn.addEventListener('mousedown', startPress);
-    voiceBtn.addEventListener('touchend', cancelPress);
-    voiceBtn.addEventListener('mouseup', cancelPress);
-
-    /* Upload modal */
-    openUpload.addEventListener('click', function(){ if (!getBiz()){ teamCodeInput.value=""; showModal(codeModal); return; } showModal(uploadModal); renderFileList(); });
-    closeUpload.addEventListener('click', function(){ hideModal(uploadModal); });
+    saveCodeBtn.addEventListener('click', function(){
+      var v = (teamCodeInput.value||"").trim();
+      if(!/^[0-9]{4}-[0-9]{4}$/.test(v)) { showErr("Enter a code like 1234-5678"); return; }
+      setBiz(v); updateGate();
+    });
+    buyBtn.addEventListener('click', function(){
+      // Hosted checkout link (Stripe)
+      window.location.href = "https://buy.stripe.com/14A14ng1E3Gn4BmceI5sA0b?prefilled_email=";
+    });
 
     /* ---- audio session ---- */
     var isSession=false,isListening=false,isProcessing=false,isSpeaking=false;
@@ -180,10 +160,7 @@
 
     function setState(cls){
       voiceBtn.className = 'voice-button ' + cls;
-      var map = {
-        idle:'Press to talk', listening:'Listening — tap to stop', thinking:'Working…',
-        speaking:'Speaking — tap to interrupt', error:'Error — tap to retry'
-      };
+      var map = { idle:'Press to talk', listening:'Listening — tap to stop', thinking:'Working…', speaking:'Speaking — tap to interrupt', error:'Error — tap to retry' };
       voiceBtn.setAttribute('aria-label', map[cls] || 'Press to talk');
     }
     function getPreferredMime(){
@@ -198,19 +175,16 @@
       }
       return '';
     }
-    async function ensureAudio(){
-      if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-      if(audioCtx.state!=='running') await audioCtx.resume();
-    }
+    async function ensureAudio(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state!=='running') await audioCtx.resume(); }
     async function startListening(){
+      if(!hasCode()){ updateGate(); return; }
       if(isListening||isProcessing) return;
       isListening=true; setState('listening');
       await ensureAudio();
       micStream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:true }, video:false });
       var mime = getPreferredMime(); var opts={}; if(mime) opts.mimeType=mime;
       recorder = new MediaRecorder(micStream, opts);
-      chunks=[];
-      recorder.ondataavailable = function(e){ if(e.data && e.data.size>0) chunks.push(e.data); };
+      chunks=[]; recorder.ondataavailable = function(e){ if(e.data && e.data.size>0) chunks.push(e.data); };
       recorder.onstop = processRecording;
       recorder.start(120);
     }
@@ -240,41 +214,29 @@
           body: JSON.stringify(payload),
           signal: inflight.signal
         });
-        var data = {};
-        try{ data = await resp.json(); }catch(e){ data = {}; }
+        var data = {}; try{ data = await resp.json(); }catch(e){ data = {}; }
 
         if(data && data.sessionId) sessionId = data.sessionId;
-
-        // control
         if(data && data.control){
           if(data.control.adminArmed) armAdmin();
           if(data.control.adminDisarm) disarmAdmin();
-          if(data.control.requireCode){ teamCodeInput.value=""; showModal(codeModal); }
+          if(data.control.requireCode){ setBiz(""); updateGate(); }
         }
-
-        if(data && data.audio){
-          await play(data.audio);
-        }else{
-          setState('idle');
-        }
+        if(data && data.audio){ await play(data.audio); } else { setState('idle'); }
 
         isProcessing=false;
         if(isSession) startListening();
       }catch(e){
-        isProcessing=false;
-        setState('error');
-        showErr(e && e.stack ? e.stack : e);
+        isProcessing=false; setState('error'); showErr(e && e.stack ? e.stack : e);
       }
     }
     async function play(dataUrl){
       try{
         isSpeaking=true; setState('speaking');
-        speaker.src = dataUrl; await speaker.play();
-        await new Promise(function(r){ speaker.onended = r; });
+        var a = new Audio(); a.preload="none"; a.playsInline=true; a.src=dataUrl; await a.play();
+        await new Promise(function(r){ a.onended=r; });
         isSpeaking=false; setState('idle');
-      }catch(e){
-        isSpeaking=false; setState('error'); showErr(e);
-      }
+      }catch(e){ isSpeaking=false; setState('error'); showErr(e); }
     }
     function blobToBase64(blob){
       return new Promise(function(res,rej){
@@ -286,6 +248,7 @@
     }
     async function runBriefThenListen(){
       try{
+        if(!hasCode()){ updateGate(); return; }
         setState('thinking');
         var r = await fetch('/.netlify/functions/brief', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ businessId:getBiz() }) });
         var j = {}; try{ j = await r.json(); }catch(e){ j={}; }
@@ -293,27 +256,20 @@
         await startListening();
       }catch(e){ await startListening(); }
     }
-
-    /* Toggle mic */
     voiceBtn.addEventListener('click', async function(e){
       e.preventDefault();
-      if(!getBiz()){ teamCodeInput.value=""; showModal(codeModal); return; }
-      if(!isSession){
-        isSession = true;
-        sessionId = 'sess_' + Date.now();
-        runBriefThenListen();
-      }else{
-        try{ if(isSpeaking){ speaker.pause(); speaker.currentTime=0; } }catch(e){}
-        isSpeaking=false;
-        stopListening(); isSession=false; setState('idle');
-      }
+      if(!hasCode()){ updateGate(); return; }
+      if(!isSession){ isSession = true; sessionId = 'sess_' + Date.now(); runBriefThenListen();
+      }else{ stopListening(); isSession=false; setState('idle'); }
     });
 
-    /* ==== uploads ==== */
-    fileInput.addEventListener('change', async function(){
-      var files = Array.from(fileInput.files || []);
-      if(!files.length) return;
+    /* ---- uploads ---- */
+    openUpload.addEventListener('click', function(){ if(!hasCode()){ updateGate(); return; } showUpload(); });
+    function showUpload(){ uploadModal.classList.add('open'); uploadModal.setAttribute('aria-hidden','false'); renderFileList(); }
+    closeUpload.addEventListener('click', function(){ uploadModal.classList.remove('open'); uploadModal.setAttribute('aria-hidden','true'); });
 
+    fileInput.addEventListener('change', async function(){
+      var files = Array.from(fileInput.files || []); if(!files.length) return;
       for (var i=0;i<files.length;i++){
         var file = files[i];
         if(file.size > 10*1024*1024){ showProgress(file.name, 'Too large (max 10MB)', 0, true); continue; }
@@ -322,61 +278,37 @@
           var ext = (file.name.split('.').pop()||'').toLowerCase();
           var textObj;
           if(ext === 'pdf'){
-            updateProgress(slot, 8, 'Loading PDF engine…');
-            await ensurePdfJs();
+            updateProgress(slot, 8, 'Loading PDF engine…'); await ensurePdfJs();
             textObj = await extractPdfText(file, function(p){ updateProgress(slot, p, 'Extracting…'); });
           }else{
-            var t = await file.text();
-            textObj = { text: t };
-            updateProgress(slot, 60, 'Processing…');
+            var t = await file.text(); textObj = { text: t }; updateProgress(slot, 60, 'Processing…');
           }
           updateProgress(slot, 70, 'Uploading…');
           await uploadDoc(file.name, file.size, textObj.text);
           updateProgress(slot, 100, 'Completed', true);
-        }catch(err){
-          updateProgress(slot, 0, 'Failed', true, true);
-          showErr(err && err.stack ? err.stack : err);
-        }
+        }catch(err){ updateProgress(slot, 0, 'Failed', true, true); showErr(err && err.stack ? err.stack : err); }
       }
-      await renderFileList();
-      fileInput.value = '';
+      await renderFileList(); fileInput.value = '';
     });
 
-    async function ensurePdfJs(){
-      if(window.pdfjsLib) return;
-      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.2.67/pdf.min.js');
-    }
-    function loadScript(src){
-      return new Promise(function(res,rej){
-        var s=document.createElement('script');
-        s.src=src; s.async=true; s.onload=res; s.onerror=function(){ rej(new Error('Failed to load ' + src)); };
-        document.head.appendChild(s);
-      });
+    async function ensurePdfJs(){ if(window.pdfjsLib) return;
+      await new Promise(function(res,rej){ var s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.2.67/pdf.min.js'; s.async=true; s.onload=res; s.onerror=function(){ rej(new Error('Failed to load pdf.js')); }; document.head.appendChild(s); });
     }
     async function extractPdfText(file, onProg){
-      onProg(12);
-      var buf = await file.arrayBuffer(); onProg(20);
+      onProg(12); var buf = await file.arrayBuffer(); onProg(20);
       var pdf = await window.pdfjsLib.getDocument({ data: buf }).promise; onProg(30);
-      var text = '';
-      for(var p=1;p<=pdf.numPages;p++){
-        var page = await pdf.getPage(p);
-        var cnt = await page.getTextContent();
-        var seg = cnt.items.map(function(it){ return it.str; }).join(' ');
-        text += seg + '\\n';
-        onProg(30 + Math.floor((p/pdf.numPages)*40));
-      }
-      return { text: text };
+      var text=''; for(var p=1;p<=pdf.numPages;p++){ var page = await pdf.getPage(p); var cnt = await page.getTextContent(); var seg = cnt.items.map(function(it){ return it.str; }).join(' '); text += seg + '\n'; onProg(30 + Math.floor((p/pdf.numPages)*40)); }
+      return { text:text };
     }
-
     function showProgress(name, label, pct, done, error){
       var wrap = document.createElement('div');
-      wrap.className = 'item';
-      wrap.innerHTML = '<div class="meta">'+escapeHtml(name)+'</div>\
+      wrap.className='item';
+      wrap.innerHTML='<div class="meta">'+escapeHtml(name)+'</div>\
       <div style="flex:1;margin-left:10px">\
         <div class="bar"><div class="fill" style="width:'+ (pct||0) +'%"></div></div>\
         <div class="meta">'+label+(done ? (error ? '' : ' <span class="chk">✔</span>') : '')+'</div>\
       </div>';
-      uploadArea.prepend(wwrap=wrap);
+      uploadArea.prepend(wrap);   /* FIX: no stray identifier */
       return wrap;
     }
     function updateProgress(slot, pct, label, done){
@@ -386,8 +318,7 @@
     }
     async function uploadDoc(name, size, text){
       var r = await fetch('/.netlify/functions/files', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
+        method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ businessId:getBiz(), name:name, size:size, text:text })
       });
       if(!r.ok) throw new Error('upload failed: '+r.status);
@@ -398,31 +329,22 @@
         var r = await fetch('/.netlify/functions/files?businessId=' + encodeURIComponent(getBiz()));
         var j = {}; try{ j = await r.json(); }catch(e){ j={}; }
         var docs = j.docs || [];
-        fileList.innerHTML = docs.length
-          ? docs.map(function(d){
-              var kb = Math.round((d.size||0)/1024);
-              return '<div class="item">\
-                <div class="meta">'+escapeHtml(d.name)+' <span style="opacity:.6;font-size:12px">('+kb+' KB)</span></div>\
-                <button class="btn" data-id="'+escapeHtml(d.id)+'">Remove</button>\
-              </div>';
-            }).join('')
-          : '<div class="meta" style="opacity:.75">No files uploaded yet.</div>';
+        fileList.innerHTML = docs.length ? docs.map(function(d){
+          var kb = Math.round((d.size||0)/1024);
+          return '<div class="item"><div class="meta">'+escapeHtml(d.name)+' <span style="opacity:.6;font-size:12px">('+kb+' KB)</span></div><button class="btn" data-id="'+escapeHtml(d.id)+'">Remove</button></div>';
+        }).join('') : '<div class="meta" style="opacity:.75">No files uploaded yet.</div>';
         var btns = fileList.querySelectorAll('button[data-id]');
         for(var i=0;i<btns.length;i++){
-          btns[i].onclick = (function(b){
-            return async function(){
-              await fetch('/.netlify/functions/files?businessId='+encodeURIComponent(getBiz())+'&id='+encodeURIComponent(b.getAttribute('data-id')), { method:'DELETE' });
-              renderFileList();
-            };
-          })(btns[i]);
+          btns[i].onclick = (function(b){ return async function(){
+            await fetch('/.netlify/functions/files?businessId='+encodeURIComponent(getBiz())+'&id='+encodeURIComponent(b.getAttribute('data-id')), { method:'DELETE' });
+            renderFileList();
+          }; })(btns[i]);
         }
-      }catch(e){ /* don’t crash UI */ }
+      }catch(e){}
     }
     function escapeHtml(s){ return String(s||"").replace(/[&<>"']/g, function(m){ return ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" })[m]; }); }
 
-  }catch(e){
-    showErr(e && e.stack ? e.stack : e);
-  }
+  }catch(e){ showErr(e && e.stack ? e.stack : e); }
 })();
 </script>
 </body>
