@@ -100,7 +100,7 @@
       <button class="btn" id="closeCode">Close</button>
     </div>
     <div class="row" style="margin-top:12px">
-      <input id="teamCode" type="text" placeholder="e.g. NORA-ABCD-1234"/>
+      <input id="teamCode" type="text" placeholder="e.g. NORA-ABCD-1234 or TEAM-NORA"/>
       <button class="btn" id="saveCode">Save</button>
     </div>
   </div>
@@ -108,6 +108,8 @@
 
 <script>
 (() => {
+  const DEMO_CODE = 'TEAM-NORA';
+
   const voiceBtn = document.getElementById('voiceBtn');
   const openUpload = document.getElementById('openUpload');
   const uploadModal = document.getElementById('uploadModal');
@@ -125,10 +127,13 @@
   function getBiz(){ return localStorage.getItem(STORAGE_KEY) || ""; }
   function setBiz(v){ localStorage.setItem(STORAGE_KEY, String(v||"").trim()); }
 
+  // Auto-set demo code on first load if there isn't one
+  if (!getBiz()) { setBiz(DEMO_CODE); }
+
   function showModal(m){ m.classList.add('open'); m.setAttribute('aria-hidden','false'); }
   function hideModal(m){ m.classList.remove('open'); m.setAttribute('aria-hidden','true'); }
 
-  // Team code actions (modal is now manual only: long-press mic or tap mic with no code)
+  // Team code actions
   saveCodeBtn.addEventListener('click', () => { const v = teamCodeInput.value.trim(); if (!v) return; setBiz(v); hideModal(codeModal); });
   closeCodeBtn.addEventListener('click', () => hideModal(codeModal));
 
@@ -246,7 +251,7 @@
     }catch{ await startListening(); }
   }
 
-  // Toggle mic: if no team code, prompt for it
+  // Toggle mic
   voiceBtn.addEventListener('click', async (e)=>{
     e.preventDefault();
     if (!getBiz()) { teamCodeInput.value = ""; showModal(codeModal); return; }
@@ -260,7 +265,7 @@
     }
   });
 
-  // File uploads
+  // ==== File uploads ====
   fileInput.addEventListener('change', async () => {
     const files = Array.from(fileInput.files || []);
     if (!files.length) return;
