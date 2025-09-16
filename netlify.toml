@@ -1,5 +1,5 @@
 [build]
-  publish   = "."
+  publish = "."
   functions = "netlify/functions"
 
 [functions]
@@ -9,7 +9,4 @@
   timeout = 26
 
 [functions."brief"]
-  timeout = 20
-
-[functions."upload"]
   timeout = 20
