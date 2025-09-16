@@ -15,8 +15,8 @@ function isCode(s){ return /^[0-9]{4}-[0-9]{4}$/.test(String(s||"")); }
 function team(id){ if(!DB.has(id)) DB.set(id,{updates:[],longterm:[],docs:[],lastSay:"",lastAdded:null}); return DB.get(id); }
 const j=(b,s=200)=>({statusCode:s,headers:{"Content-Type":"application/json","Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"Content-Type"},body:JSON.stringify(b)});
 
-const ACK_UPDATE = ["Got it — added.", "Okay, added to today.", "Noted for today.", "Added to the updates."];
-const ACK_LT     = ["Saved for the handbook.", "I’ll keep that.", "Logged for long-term.", "Stored permanently."];
+const ACK_UPDATE = ["Got it.", "Noted.", "Added.", "Okay—saved."];
+const ACK_LT     = ["Saved.", "Logged.", "I’ll keep that.", "Stored."];
 const ACK_DELETE = ["Deleted.", "Removed.", "Erased."];
 
 export const handler = async (event)=>{
@@ -31,71 +31,88 @@ export const handler = async (event)=>{
     const audio = body.audio||{};
     if(!audio.data || !audio.mime) return j({error:"no_audio"});
 
-    // STT
+    // --- STT (robust) ---
     let transcript=""; try{ transcript = await transcribeRobust(audio.data, audio.mime); }
     catch(e){ return j({error:`STT ${e.message||'failed'}`}); }
     const raw=(transcript||"").trim(); if(!raw) return say(team(businessId),"I didn’t catch that. Try again.");
     const lower=raw.toLowerCase();
     const state=team(businessId);
 
-    // first-run: answer yes/no admin
+    // --- first run role capture ---
     if(expectRole){
-      const isYes=/\b(yes|yeah|yep|i am|i'm|admin)\b/.test(lower);
-      const isNo =/\b(no|nope|not|employee|staff)\b/.test(lower);
-      if(isYes && !isNo) return say(state,"Great — admin mode set for this device.",{control:{role:"admin"}});
-      if(isNo  && !isYes) return say(state,"Okay — this device is set as employee.",{control:{role:"employee"}});
-      return say(state,"Was that yes or no? Say yes if you’re the admin, otherwise no.",{control:{askRoleAgain:true}});
+      const yes=/\b(yes|yeah|yep|i am|i'm|admin)\b/.test(lower);
+      const no =/\b(no|nope|not|employee|staff)\b/.test(lower);
+      if(yes && !no) return say(state,"Admin mode set for this device.",{control:{role:"admin"}});
+      if(no  && !yes) return say(state,"Okay—this device is employee.",{control:{role:"employee"}});
+      return say(state,"Was that yes or no?",{control:{askRoleAgain:true}});
     }
 
-    // global repeats
-    if(/\b(repeat|say it again|one more time|repeat that)\b/.test(lower)){
+    // --- universal repeats ---
+    if(/\b(repeat|say it again|one more time|repeat that|what about it)\b/.test(lower)){
       return state.lastSay ? say(state,state.lastSay) : say(state,"There’s nothing to repeat yet.");
     }
 
-    // ADMIN — everything you say becomes knowledge
+    // --- “what did you just add / note / save” ---
+    if(/\b(what (did|have) (you )?(just )?(add|note|save|store|log)(ed)?|what did i (just )?(add|say|note))\b/.test(lower)){
+      if(state.lastAdded) return say(state, `You just saved: “${state.lastAdded.text}”.`);
+      return say(state,"We haven’t saved anything yet.");
+    }
+
+    // --- “what do you have stored / what do you know” summary ---
+    if(/\b(what (do|d'you) (you )?(have|know|remember)|what'?s in (memory|store|storage)|show (me )?(memory|notes|updates))\b/.test(lower)){
+      return say(state, buildHighlights(state));
+    }
+
+    // --- EMPLOYEE quick updates ---
+    if(role!=="admin" && /\b(what('?| i)s new|any updates|updates (today|for today))\b/.test(lower)){
+      return say(state, whatsNewMsg(state));
+    }
+
+    // --- ADMIN: classify vs Q&A ---
     if(role==="admin"){
-      // quick recall of last addition
-      if(/\b(what about it|what did i just say|what was that|repeat the last thing)\b/.test(lower)){
-        if(state.lastAdded){ return say(state, `You just added: “${state.lastAdded.text}”.`); }
-        return say(state,"We haven’t saved anything this session yet.");
+      // If it looks like a question, treat as a query instead of saving
+      const looksQuestion = /[?]$/.test(raw) || /\b(what|when|where|who|why|how|which|do we|can we|should we)\b/i.test(raw);
+      if(looksQuestion){
+        const ans = await answerFromMemory(state, raw);
+        if(/I don’t have that yet/i.test(ans)){
+          return say(state, "I might not have that. Want me to save the answer you just gave, or add details now?");
+        }
+        return say(state, ans);
       }
 
       // delete / forget
-      if(/^(delete|remove|forget)\b/.test(lower)){
+      if(/^(delete|remove|forget)\b/i.test(raw)){
         const tail = raw.replace(/^(delete|remove|forget)\b[:\-]?\s*/i,"").trim();
         if(!tail) return say(state,"Tell me what to delete.");
         const uIdx = [...state.updates].reverse().findIndex(u=>u.text.toLowerCase().includes(tail.toLowerCase()));
         if(uIdx>=0){ state.updates.splice(state.updates.length-1-uIdx,1); return say(state, pick(ACK_DELETE)); }
         const lIdx = [...state.longterm].reverse().findIndex(u=>u.text.toLowerCase().includes(tail.toLowerCase()));
         if(lIdx>=0){ state.longterm.splice(state.longterm.length-1-lIdx,1); return say(state, pick(ACK_DELETE)); }
-        return say(state,"I didn’t find a match to delete.");
+        return say(state,"I didn’t find that.");
       }
 
-      // classify: long-term if it sounds permanent/policy-ish; else update
-      const isLT = /(\bpermanent\b|\balways\b|\bpolicy\b|\bhandbook\b|\bprocedure\b|\baddress\b|\bphone\b|\bhours\b|\bsafety\b|\bmenu\b|\bforever\b|\bpersist\b)/i.test(raw)
+      // save: classify softly (no UX talk about “long-term” vs “update”)
+      const isLT = /(\bpermanent\b|\balways\b|\bpolicy\b|\bhandbook\b|\bprocedure\b|\bhours\b|\baddress\b|\bphone\b|\bsafety\b|\bmenu\b|\bforever\b|\bpersist\b)/i.test(raw)
                 || /^(remember|save|store|keep|log)\b/i.test(raw);
+      const cleaned = raw.replace(/^(remember|save|store|keep|log)\b[:\-]?\s*/i,"").trim();
+      const text = cleaned || raw;
       if(isLT){
-        const text = raw.replace(/^(remember|save|store|keep|log)\b[:\-]?\s*/i,"").trim();
         state.longterm.push({text,ts:now()}); state.lastAdded={type:"longterm",text}; prune(state);
-        return say(state,pick(ACK_LT));
+        return say(state, pick(ACK_LT));
       }else{
-        state.updates.push({text:raw,ts:now()}); state.lastAdded={type:"update",text:raw}; prune(state);
-        return say(state,pick(ACK_UPDATE));
+        state.updates.push({text,ts:now()}); state.lastAdded={type:"update",text}; prune(state);
+        return say(state, pick(ACK_UPDATE));
       }
     }
 
-    // EMPLOYEE — quick "what's new" phrase handled on client; here we do Q&A
-    if(/\b(what('?| i)s new|any updates|updates (today|for today))\b/.test(lower)){
-      const msg = whatsNewMsg(state); return say(state,msg);
-    }
-
+    // --- EMPLOYEE Q&A from memory ---
     const answer = await answerFromMemory(state, raw);
     return say(state, answer);
 
   }catch(e){ console.error(e); return j({error:"server_error"},500); }
 };
 
-// ---------- helpers ----------
+// -------- helpers --------
 function prune(state){
   const cut=now()-UPDATES_TTL_HOURS*3600*1000;
   state.updates  = state.updates.filter(u=>(u.ts||0)>=cut).slice(-500);
@@ -105,18 +122,28 @@ function prune(state){
 function whatsNewMsg(state){
   const cut=now()-BRIEF_WINDOW_HOURS*3600*1000;
   const recent=state.updates.filter(u=>(u.ts||0)>=cut).map(u=>u.text);
-  return recent.length? "Here’s the latest. "+recent.slice(-8).map(s=>"• "+s).join("  ") : "No new updates right now.";
+  return recent.length? "Latest: "+recent.slice(-8).map(s=>"• "+s).join("  ") : "No new updates.";
 }
-function pick(arr){ return arr[Math.floor(Math.random()*arr.length)] || arr[0]; }
+function buildHighlights(state){
+  const recent = state.updates.slice(-5).map(u=>u.text);
+  const core   = state.longterm.slice(-5).map(u=>u.text);
+  if(!recent.length && !core.length) return "I don’t have anything saved yet.";
+  let msg="Here’s a snapshot. ";
+  if(recent.length) msg += "Recent: "+recent.map(s=>"• "+s).join("  ")+". ";
+  if(core.length)   msg += "Key info: "+core.map(s=>"• "+s).join("  ")+".";
+  return msg.trim();
+}
+function pick(a){ return a[Math.floor(Math.random()*a.length)] || a[0]; }
 
 async function answerFromMemory(state, question){
-  const pool=[...state.longterm.map(x=>({text:x.text})), ...state.docs.map(d=>({text:d.text}))];
-  if(pool.length===0) return "I don’t have that yet. Ask your admin to add it.";
+  // include updates too (new)
+  const pool=[...state.longterm.map(x=>({text:x.text})), ...state.docs.map(d=>({text:d.text})), ...state.updates.map(x=>({text:x.text}))];
+  if(pool.length===0) return "I don’t have that yet.";
   const qset=new Set(tok(question));
   const ranked=pool.map(it=>{const w=new Set(tok(it.text)); let o=0; for(const t of qset) if(w.has(t)) o++; return {it,score:o/Math.max(1,Math.min(qset.size,w.size))};})
                    .sort((a,b)=>b.score-a.score);
-  const top=ranked.slice(0,6).map(x=>x.it.text);
-  const system="You are Nora, a voice-first team assistant. Answer ONLY from the context. If it’s not covered, say you don’t have that yet. Keep answers brief.";
+  const top=ranked.slice(0,8).map(x=>x.it.text);
+  const system="You are Nora, a voice-first team assistant. Answer ONLY from the context. If it’s not covered, say you don’t have that yet. Keep answers brief and direct.";
   const user=`Question: ${question}\n\nContext:\n- ${top.join("\n- ")}`;
   const r=await fetch(`${OPENAI_ROOT}/chat/completions`,{
     method:"POST",headers:{Authorization:`Bearer ${OPENAI_API_KEY}`,"Content-Type":"application/json"},
@@ -139,7 +166,7 @@ async function transcribeRobust(b64, mime){
     try{
       const fd=new FormData();
       fd.set("model",STT_MODEL); fd.set("temperature","0.2");
-      fd.set("prompt","Short workplace update or question for a team assistant.");
+      fd.set("prompt","Workplace updates and questions for a team assistant. Short sentences, names, SKU codes.");
       fd.set("file",new Blob([data],{type:a.mime}),"audio"+a.ext);
       const r=await fetch(`${OPENAI_ROOT}/audio/transcriptions`,{method:"POST",headers:{Authorization:`Bearer ${OPENAI_API_KEY}`},body:fd});
       if(!r.ok){ last=new Error(`STT ${r.status}: ${await r.text()}`); continue; }
