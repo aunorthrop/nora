@@ -25,90 +25,83 @@
   .voice-button.speaking{background:#13c26b;color:#fff}
   .voice-button.error{background:#ff4d4f;color:#fff}
   .mic-icon{width:36px;height:36px;fill:currentColor}
-  .buy-btn{position:fixed;top:14px;right:14px;z-index:1000;padding:10px 14px;border-radius:10px;border:none;background:#222;color:#fff;font:500 14px/1 system-ui,-apple-system,Inter,Segoe UI,Roboto,Arial,sans-serif;text-decoration:none;box-shadow:0 4px 16px rgba(0,0,0,.15)}
+
+  .buy-btn{
+    position:fixed;top:14px;left:14px;z-index:3000;padding:10px 14px;border-radius:12px;border:none;
+    background:#222;color:#fff;font:500 14px/1 system-ui,-apple-system,Inter,Segoe UI,Roboto,Arial,sans-serif;
+    text-decoration:none;box-shadow:0 6px 18px rgba(0,0,0,.25);pointer-events:auto
+  }
   .buy-btn:active{transform:scale(.98)}
-  .gear{position:fixed;top:14px;left:14px;opacity:.65;cursor:pointer}
-  .gear:hover{opacity:1}
 
-  /* Upload (+) button */
-  .plus{position:fixed;bottom:16px;right:16px;z-index:1000}
-  .btn{background:#1b5fff;color:#fff;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.25)}
-  .btn.secondary{background:#242936;color:#e9eef6}
-  .btn:active{transform:scale(.98)}
+  .plus{position:fixed;top:14px;right:14px;z-index:3000}
+  .plus-btn{
+    width:44px;height:44px;border:none;border-radius:12px;background:#1b5fff;color:#fff;cursor:pointer;
+    box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:24px;line-height:44px;text-align:center
+  }
+  .plus-btn:active{transform:scale(.98)}
 
-  /* Modal */
-  .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:20px;z-index:2000}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:20px;z-index:4000}
   .modal.open{display:flex}
   .card{background:#141821;border:1px solid rgba(255,255,255,.07);border-radius:16px;max-width:520px;width:100%;padding:18px;box-shadow:0 18px 55px rgba(0,0,0,.45)}
-  .card h2{font-size:18px;margin-bottom:6px}
-  .card p{font-size:14px;opacity:.85;margin-bottom:10px}
   .row{display:flex;gap:10px;margin-top:8px;align-items:center}
-  .pill{position:fixed; left:14px; bottom:16px; background:#1a1f2b; color:#bfc7d9; padding:6px 10px; border-radius:999px; font-size:12px; opacity:.9}
-  input[type=text]{flex:1;background:#0e1219;border:1px solid rgba(255,255,255,.08);border-radius:10px;color:#e9eef6;padding:10px 12px;font-size:14px}
   .file-choose{display:inline-block}
   .file-choose input{display:none}
-  .file-choose label{display:inline-block;background:#242936;color:#e9eef6;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer}
+  .file-choose label{
+    display:inline-block;background:#242936;color:#e9eef6;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer
+  }
+  .btn{background:#242936;color:#e9eef6;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer}
+  .btn:active{transform:scale(.98)}
+  input[type=text]{flex:1;background:#0e1219;border:1px solid rgba(255,255,255,.08);border-radius:10px;color:#e9eef6;padding:10px 12px;font-size:14px}
   .list{margin-top:12px;max-height:240px;overflow:auto;border-top:1px solid rgba(255,255,255,.06);padding-top:10px}
   .item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)}
   .meta{opacity:.85;font-size:13px}
   .bar{height:8px;background:#242936;border-radius:8px;overflow:hidden;margin-top:8px}
   .fill{height:100%;width:0;background:#1b5fff;transition:width .2s}
   .chk{margin-left:8px;color:#13c26b;font-size:14px}
-  .hint{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);opacity:.7;font-size:12px}
 </style>
 
-<!-- PDF.js for client-side text extraction -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.2.67/pdf.min.js" integrity="sha512-7ofX1w1+4XNlJ0iSvk3oYl2j4mECwR0x3q0rO8dG8Zb3kQJQz8sSXVQ7g7p3o8J0e0cS2sO1+G0UuL0adgq6xQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </head>
 <body>
 
-<!-- Buy (Checkout Link) -->
 <a class="buy-btn" href="https://buy.stripe.com/14A14ng1E3Gn4BmceI5sA0b" target="_blank" rel="noopener">Subscribe – $10/mo</a>
 
-<!-- Team code gear -->
-<svg class="gear" id="openSettings" width="24" height="24" viewBox="0 0 24 24" fill="#cbd5e1" xmlns="http://www.w3.org/2000/svg"><path d="M19.14,12.94a7.09,7.09,0,0,0,.05-.94,7.09,7.09,0,0,0-.05-.94l2.11-1.65a.48.48,0,0,0,.11-.61l-2-3.46a.5.5,0,0,0-.6-.22l-2.49,1A7.09,7.09,0,0,0,14.5,4.6l-.38-2.65A.5.5,0,0,0,13.62,1H10.38a.5.5,0,0,0-.5.42L9.5,4.1a7.09,7.09,0,0,0-2,1.22l-2.49-1a.5.5,0,0,0-.6.22l-2,3.46a.48.48,0,0,0,.11.61L4.06,11a7.09,7.09,0,0,0-.05.94,7.09,7.09,0,0,0,.05.94L1.95,14.53a.48.48,0,0,0-.11.61l2,3.46a.5.5,0,0,0,.6.22l2.49-1a7.09,7.09,0,0,0,2,1.22l.38,2.65a.5.5,0,0,0,.5.42h3.24a.5.5,0,0,0,.5-.42l.38-2.65a7.09,7.09,0,0,0,2-1.22l2.49,1a.5.5,0,0,0,.6-.22l2-3.46a.48.48,0,0,0-.11-.61ZM12,15.5A3.5,3.5,0,1,1,15.5,12,3.5,3.5,0,0,1,12,15.5Z"/></svg>
+<div class="plus"><button class="plus-btn" id="openUpload" aria-label="Upload files">＋</button></div>
 
-<!-- Team code pill -->
-<span class="pill" id="teamPill">no team</span>
-
-<!-- Mic button -->
 <button id="voiceBtn" class="voice-button idle" aria-label="Press to talk">
   <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
     <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c1.66 0 3 1.34 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/>
   </svg>
 </button>
 
-<div class="hint" id="engineInfo"></div>
-
-<!-- Upload (+) -->
-<div class="plus"><button class="btn" id="openUpload">＋</button></div>
-
 <!-- Upload modal -->
 <div class="modal" id="uploadModal" aria-hidden="true">
   <div class="card">
-    <h2>Files</h2>
-    <p>Upload reference files. I’ll use them to answer questions.</p>
-    <div class="row">
+    <div class="row" style="justify-content:space-between">
+      <div class="meta" style="opacity:.9">Files</div>
+      <button class="btn" id="closeUpload">Close</button>
+    </div>
+    <div class="row" style="margin-top:12px">
       <div class="file-choose">
         <input id="fileInput" type="file" multiple accept=".pdf,.txt,.md,.markdown"/>
         <label for="fileInput">Choose files</label>
       </div>
-      <button class="btn secondary" id="closeUpload">Close</button>
     </div>
     <div id="uploadArea"></div>
     <div class="list" id="fileList"></div>
   </div>
 </div>
 
-<!-- Team code modal -->
+<!-- Team code modal (open by mic long-press or when tapping mic with no code) -->
 <div class="modal" id="codeModal" aria-hidden="true">
   <div class="card">
-    <h2>Enter team code</h2>
-    <p>This links your device to your business. You only do this once.</p>
-    <div class="row">
-      <input id="teamCode" type="text" placeholder="e.g. ACME-123"/>
+    <div class="row" style="justify-content:space-between">
+      <div class="meta" style="opacity:.9">Enter team code</div>
+      <button class="btn" id="closeCode">Close</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <input id="teamCode" type="text" placeholder="e.g. NORA-ABCD-1234"/>
       <button class="btn" id="saveCode">Save</button>
-      <button class="btn secondary" id="closeCode">Close</button>
     </div>
   </div>
 </div>
@@ -116,37 +109,40 @@
 <script>
 (() => {
   const voiceBtn = document.getElementById('voiceBtn');
-  const codeModal = document.getElementById('codeModal');
-  const teamCodeInput = document.getElementById('teamCode');
-  const saveCodeBtn = document.getElementById('saveCode');
-  const closeCodeBtn = document.getElementById('closeCode');
-  const openSettings = document.getElementById('openSettings');
-  const engineInfo = document.getElementById('engineInfo');
-  const teamPill = document.getElementById('teamPill');
-
-  const uploadModal = document.getElementById('uploadModal');
   const openUpload = document.getElementById('openUpload');
+  const uploadModal = document.getElementById('uploadModal');
   const closeUpload = document.getElementById('closeUpload');
   const fileInput = document.getElementById('fileInput');
   const uploadArea = document.getElementById('uploadArea');
   const fileList = document.getElementById('fileList');
 
+  const codeModal = document.getElementById('codeModal');
+  const teamCodeInput = document.getElementById('teamCode');
+  const saveCodeBtn = document.getElementById('saveCode');
+  const closeCodeBtn = document.getElementById('closeCode');
+
   const STORAGE_KEY = 'nora_business_code';
   function getBiz(){ return localStorage.getItem(STORAGE_KEY) || ""; }
-  function setBiz(v){ localStorage.setItem(STORAGE_KEY, String(v||"").trim()); teamPill.textContent = v || "no team"; }
+  function setBiz(v){ localStorage.setItem(STORAGE_KEY, String(v||"").trim()); }
 
   function showModal(m){ m.classList.add('open'); m.setAttribute('aria-hidden','false'); }
   function hideModal(m){ m.classList.remove('open'); m.setAttribute('aria-hidden','true'); }
 
-  // Team code modal wiring
-  openSettings.addEventListener('click', () => { teamCodeInput.value = getBiz(); showModal(codeModal); teamCodeInput.focus(); });
+  // Team code actions (modal is now manual only: long-press mic or tap mic with no code)
   saveCodeBtn.addEventListener('click', () => { const v = teamCodeInput.value.trim(); if (!v) return; setBiz(v); hideModal(codeModal); });
   closeCodeBtn.addEventListener('click', () => hideModal(codeModal));
 
-  if (!getBiz()) showModal(codeModal); teamPill.textContent = getBiz() || "no team";
+  // Long-press mic to open team code modal anytime
+  let pressTimer;
+  function startPress(){ clearTimeout(pressTimer); pressTimer = setTimeout(()=>{ teamCodeInput.value = getBiz(); showModal(codeModal); }, 1200); }
+  function cancelPress(){ clearTimeout(pressTimer); }
+  voiceBtn.addEventListener('touchstart', startPress, {passive:true});
+  voiceBtn.addEventListener('mousedown', startPress);
+  voiceBtn.addEventListener('touchend', cancelPress);
+  voiceBtn.addEventListener('mouseup', cancelPress);
 
-  // Upload modal wiring
-  openUpload.addEventListener('click', () => { if (!getBiz()) { showModal(codeModal); return; } showModal(uploadModal); renderFileList(); });
+  // Upload modal
+  openUpload.addEventListener('click', () => { if (!getBiz()) { teamCodeInput.value = ""; showModal(codeModal); return; } showModal(uploadModal); renderFileList(); });
   closeUpload.addEventListener('click', () => hideModal(uploadModal));
 
   // Audio session
@@ -168,7 +164,6 @@
     if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
     if (audioCtx.state !== 'running') await audioCtx.resume();
   }
-
   function getPreferredMime(){
     const isiOS=/iPad|iPhone|iPod/.test(navigator.userAgent);
     const isSafari=/Safari/.test(navigator.userAgent)&&!/Chrome/.test(navigator.userAgent);
@@ -251,10 +246,10 @@
     }catch{ await startListening(); }
   }
 
-  // Button toggle
+  // Toggle mic: if no team code, prompt for it
   voiceBtn.addEventListener('click', async (e)=>{
     e.preventDefault();
-    if (!getBiz()) { showModal(codeModal); return; }
+    if (!getBiz()) { teamCodeInput.value = ""; showModal(codeModal); return; }
     if (!isSession){
       isSession = true;
       sessionId = `sess_${Date.now()}`;
@@ -265,10 +260,7 @@
     }
   });
 
-  // Engine info
-  engineInfo.textContent = "Engine: OpenAI • TTS: shimmer";
-
-  // ==== File uploads ====
+  // File uploads
   fileInput.addEventListener('change', async () => {
     const files = Array.from(fileInput.files || []);
     if (!files.length) return;
@@ -314,7 +306,7 @@
     const wrap = document.createElement('div');
     wrap.className = 'item';
     wrap.innerHTML = `
-      <div class="meta">${name}</div>
+      <div class="meta">${escapeHtml(name)}</div>
       <div style="flex:1;margin-left:10px">
         <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
         <div class="meta">${label}${done ? (error ? '' : ' <span class="chk">✔</span>') : ''}</div>
@@ -325,10 +317,10 @@
   function updateProgress(slot, pct, label, done=false){
     const fill = slot.querySelector('.fill');
     if (fill) fill.style.width = `${pct}%`;
-    const meta = slot.querySelector('.meta:last-child');
+    const metas = slot.querySelectorAll('.meta');
+    const meta = metas[metas.length-1];
     if (meta && label) meta.innerHTML = `${label}${done ? ' <span class="chk">✔</span>' : ''}`;
   }
-
   async function uploadDoc(name, size, text){
     const r = await fetch('/.netlify/functions/files',{
       method:'POST',
@@ -342,12 +334,13 @@
     const r = await fetch('/.netlify/functions/files?businessId=' + encodeURIComponent(getBiz()));
     const j = await r.json();
     const docs = j.docs || [];
-    fileList.innerHTML = docs.map(d => `
-      <div class="item">
-        <div class="meta">${escapeHtml(d.name)} <span style="opacity:.6;font-size:12px">(${Math.round(d.size/1024)} KB)</span></div>
-        <button class="btn secondary" data-id="${d.id}">Remove</button>
-      </div>
-    `).join('') || '<div class="meta">No files uploaded yet.</div>';
+    fileList.innerHTML = docs.length
+      ? docs.map(d => `
+        <div class="item">
+          <div class="meta">${escapeHtml(d.name)} <span style="opacity:.6;font-size:12px">(${Math.round(d.size/1024)} KB)</span></div>
+          <button class="btn" data-id="${d.id}">Remove</button>
+        </div>`).join('')
+      : '<div class="meta" style="opacity:.75">No files uploaded yet.</div>';
     fileList.querySelectorAll('button[data-id]').forEach(btn=>{
       btn.onclick = async () => {
         await fetch('/.netlify/functions/files?businessId='+encodeURIComponent(getBiz())+'&id='+encodeURIComponent(btn.dataset.id), { method:'DELETE' });
@@ -356,10 +349,6 @@
     });
   }
   function escapeHtml(s){ return String(s||"").replace(/[&<>"']/g, m=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[m])); }
-
-  // First brief on load if team set
-  setBiz(getBiz());
-  setState('idle');
 })();
 </script>
 </body>
