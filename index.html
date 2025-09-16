@@ -5,10 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Nora — voice-first team updates</title>
 <style>
-  :root{
-    --bg:#0e0f13; --tile:#151821; --text:#e5e7ee; --muted:#9aa3b2;
-    --lav:#a78bfa; --lav-ghost:#a78bfa26; --ok:#22c55e; --warn:#facc15; --err:#ef4444;
-  }
+  :root{ --bg:#0e0f13; --tile:#151821; --text:#e5e7ee; --muted:#9aa3b2;
+         --lav:#a78bfa; --lav-ghost:#a78bfa26; --ok:#22c55e; --warn:#facc15; --err:#ef4444; }
   html,body{height:100%} body{margin:0;background:var(--bg);color:var(--text);
     display:flex;align-items:center;justify-content:center;font-family:ui-sans-serif,system-ui,-apple-system,"Inter",Segoe UI,Roboto,Arial;
     -webkit-user-select:none;user-select:none;touch-action:manipulation}
@@ -35,7 +33,6 @@
 </head>
 <body>
 
-<!-- Gate (team code) -->
 <div id="gate" class="gate" style="display:none">
   <div class="card">
     <div style="font-weight:600">Join your team on Nora</div>
@@ -51,12 +48,10 @@
   </div>
 </div>
 
-<!-- Mic -->
 <button id="mic" class="mic idle" aria-label="Tap to toggle Nora">
   <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c1.66 0 3 1.34 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/></svg>
 </button>
 
-<!-- Upload (PDF only) -->
 <div id="uploadFab" class="fab" title="Upload PDFs">
   <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
 </div>
@@ -78,21 +73,21 @@
   const LS_ROLE='nora_role';
   const LS_INTRO_PREFIX='nora_intro_done_';
 
-  // --- toast ---
   let toastEl; function toast(m){ try{toastEl?.remove();}catch{}; toastEl=document.createElement('div'); toastEl.className='toast'; toastEl.textContent=m; document.body.appendChild(toastEl); setTimeout(()=>{try{toastEl.remove();}catch{}},3000); }
   function setState(c){ mic.className='mic '+c; }
 
-  // --- gate ---
   function normCode(s){ const t=String(s||'').replace(/[^0-9]/g,'').slice(0,8); return t.length===8? t.slice(0,4)+'-'+t.slice(4):''; }
   function showGate(){ gate.style.display='flex'; codeIn.value=localStorage.getItem(LS_CODE)||''; }
   function hideGate(){ gate.style.display='none'; }
+
   if(!localStorage.getItem(LS_CODE)) showGate();
+
   enterBtn.onclick=()=>{ const c=normCode(codeIn.value)||codeIn.value.trim(); if(!/^\d{4}-\d{4}$/.test(c)){ toast('Enter a code like 1234-5678'); return; } localStorage.setItem(LS_CODE,c); hideGate(); localStorage.removeItem(LS_ROLE); };
   buyBtn.onclick=()=>{ window.location.href='https://buy.stripe.com/test_1234567890'; };
 
-  // --- audio priming & playback ---
   let audioCtx, primed=false, isOn=false, isSpeaking=false, inflight=null;
   const speaker=new Audio(); speaker.preload='none'; speaker.playsInline=true;
+
   async function ensureAudio(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state!=='running') await audioCtx.resume(); }
   async function primeAudioOnce(){ if(primed) return; try{ await ensureAudio(); const b=audioCtx.createBuffer(1,1,audioCtx.sampleRate); const s=audioCtx.createBufferSource(); s.buffer=b; s.connect(audioCtx.destination); s.start(0);
       speaker.src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="; await speaker.play().catch(()=>{}); speaker.pause(); speaker.currentTime=0; primed=true; }catch{} }
@@ -109,7 +104,6 @@
   }
   function abortInFlight(){ try{ inflight?.abort(); }catch{} inflight=null; }
 
-  // --- mic on/off (one-tap toggle) ---
   mic.addEventListener('click', async ()=>{
     if(isSpeaking){ try{speaker.pause();}catch{} isSpeaking=false; setState(isOn?'listening':'idle'); return; }
     if(!localStorage.getItem(LS_CODE)){ showGate(); return; }
@@ -117,20 +111,25 @@
     if(!isOn){
       isOn=true; setState('listening'); await primeAudioOnce();
 
-      // INTRO once per team
+      // INTRO: play BEFORE starting the listen loop
       const code=localStorage.getItem(LS_CODE); const introKey=LS_INTRO_PREFIX+code;
       if(!localStorage.getItem(introKey)){
-        try{ const r=await fetch(API_VOICE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,intro:true})});
-             const j=await r.json(); if(j.audio) await playAudio(j.audio); localStorage.setItem(introKey,'1'); }catch(e){ if(!(e&&e.name==='AbortError')) toast('Intro failed'); }
+        try{
+          setState('speaking'); // visibly speaking while intro plays
+          const r=await fetch(API_VOICE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,intro:true})});
+          const j=await r.json(); if(j.audio) await playAudio(j.audio);
+          localStorage.setItem(introKey,'1');
+        }catch(e){ if(!(e&&e.name==='AbortError')) toast('Intro failed'); }
+        setState('listening');
       }
 
-      listenLoop();
+      listenLoop(); // continuous until mic tapped again
     }else{
       isOn=false; setState('idle'); abortInFlight();
     }
   });
 
-  // --- recorder + passive listen loop ---
+  // recorder + passive listen loop
   let media, rec, chunks=[];
   function pickMime(){ const M=window.MediaRecorder; if(!M||!M.isTypeSupported) return ""; const prefs=["audio/mp4;codecs=mp4a.40.2","audio/m4a","audio/webm;codecs=opus","audio/webm","audio/mpeg","audio/wav"]; for(const m of prefs) if(M.isTypeSupported(m)) return m; return ""; }
   async function startRecorder(){ const mime=pickMime(); media=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}}); rec=new MediaRecorder(media,mime?{mimeType:mime}:{});
@@ -175,7 +174,7 @@
     }
   }
 
-  // --- uploads (PDF only; UI color changed earlier) ---
+  // uploads (PDF)
   uploadFab.onclick = ()=> fileInput.click();
   fileInput.onchange = async ()=>{
     const files=[...(fileInput.files||[])].filter(f=>/pdf$/i.test(f.type)); if(!files.length){ toast('PDFs only'); return; }
@@ -188,7 +187,6 @@
     fileInput.value='';
   };
 
-  // surface only real errors
   window.addEventListener('error', e=> toast(e.message||'error'));
   window.addEventListener('unhandledrejection', e=> { const m=String(e.reason||''); if(!/AbortError/i.test(m)) toast(m); });
 })();
