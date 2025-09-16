@@ -1,65 +1,72 @@
-// Per-team lightweight document store (text only, uploaded from the client)
-// Accepts .pdf (text extracted client-side), .txt, .md
-const MAX_TEXT_CHARS = 200_000; // ~200 KB text cap
+// Minimal in-memory file/text store per team (demo-grade).
+// Accepts: POST { businessId, name, size, text }
+// GET ?businessId=####-####
+// DELETE ?businessId=####-####&id=...
 
-export const handler = async (event) => {
-  const headers = {
+const db = globalThis.__NORA_TEAMS__ || (globalThis.__NORA_TEAMS__ = new Map());
+
+const ok = (body) => ({
+  statusCode: 200,
+  headers: {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
-  };
-  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers, body: "{}" };
+  },
+  body: JSON.stringify(body),
+});
 
-  try {
-    const url = new URL(event.rawUrl || ("https://x" + (event.path || "") + (event.queryStringParameters ? ("?" + new URLSearchParams(event.queryStringParameters).toString()) : "")));
-    const businessId = (url.searchParams.get("businessId") || "").trim();
-    if (!/^[0-9]{4}-[0-9]{4}$/.test(businessId)) {
-      return { statusCode: 400, headers, body: JSON.stringify({ error: "bad_business_id" }) };
-    }
+const bad = (msg, code = 400) => ({
+  statusCode: code,
+  headers: {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type",
+  },
+  body: JSON.stringify({ error: msg }),
+});
 
-    const store = globalThis.__NORA_DOCS__ || (globalThis.__NORA_DOCS__ = new Map());
+function isCode(code) { return /^[0-9]{4}-[0-9]{4}$/.test(String(code || "")); }
+function team(biz) {
+  if (!db.has(biz)) db.set(biz, { updates: [], longterm: [], docs: [] });
+  return db.get(biz);
+}
+function uid() { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
 
-    if (event.httpMethod === "GET") {
-      const docs = store.get(businessId) || [];
-      return { statusCode: 200, headers, body: JSON.stringify({ docs }) };
-    }
+export const handler = async (event) => {
+  if (event.httpMethod === "OPTIONS") return ok({ ok: true });
 
-    if (event.httpMethod === "POST") {
-      let body;
-      try { body = JSON.parse(event.body || "{}"); }
-      catch { return { statusCode: 400, headers, body: JSON.stringify({ error: "invalid_json" }) }; }
-
-      const name = String(body.name || "").slice(0, 180);
-      const size = Number(body.size || 0);
-      const text = String(body.text || "");
-      if (!name || !text) {
-        return { statusCode: 400, headers, body: JSON.stringify({ error: "name_and_text_required" }) };
-      }
-      if (text.length > MAX_TEXT_CHARS) {
-        return { statusCode: 413, headers, body: JSON.stringify({ error: "text_too_large", max: MAX_TEXT_CHARS }) };
-      }
-
-      const docs = store.get(businessId) || [];
-      const id = Math.random().toString(36).slice(2, 10);
-      docs.push({ id, name, size, text, ts: Date.now() });
-      while (docs.length > 50) docs.shift();
-      store.set(businessId, docs);
-
-      return { statusCode: 200, headers, body: JSON.stringify({ ok: true, id }) };
-    }
-
-    if (event.httpMethod === "DELETE") {
-      const id = (new URL(event.rawUrl)).searchParams.get("id");
-      if (!id) return { statusCode: 400, headers, body: JSON.stringify({ error: "id_required" }) };
-      const docs = store.get(businessId) || [];
-      const next = docs.filter(d => d.id !== id);
-      store.set(businessId, next);
-      return { statusCode: 200, headers, body: JSON.stringify({ ok: true }) };
-    }
-
-    return { statusCode: 405, headers, body: JSON.stringify({ error: "method_not_allowed" }) };
-  } catch (e) {
-    return { statusCode: 500, headers, body: JSON.stringify({ error: e.message || "server_error" }) };
+  if (event.httpMethod === "GET") {
+    const businessId = (event.queryStringParameters || {}).businessId || "";
+    if (!isCode(businessId)) return bad("missing_or_bad_team_code");
+    const t = team(businessId);
+    return ok({ docs: t.docs.map(({ id, name, size, ts }) => ({ id, name, size, ts })) });
   }
+
+  if (event.httpMethod === "POST") {
+    let body;
+    try { body = JSON.parse(event.body || "{}"); } catch { return bad("bad_json"); }
+    const { businessId, name, size, text } = body || {};
+    if (!isCode(businessId)) return bad("missing_or_bad_team_code");
+    if (!name || typeof text !== "string") return bad("missing_name_or_text");
+
+    const t = team(businessId);
+    const id = uid();
+    t.docs.push({ id, name: String(name).slice(0, 140), size: Number(size || 0), text: String(text || ""), ts: Date.now() });
+    // cap
+    t.docs = t.docs.slice(-200);
+    return ok({ id });
+  }
+
+  if (event.httpMethod === "DELETE") {
+    const qs = event.queryStringParameters || {};
+    const businessId = qs.businessId || "";
+    const id = qs.id || "";
+    if (!isCode(businessId)) return bad("missing_or_bad_team_code");
+    const t = team(businessId);
+    const i = t.docs.findIndex(d => d.id === id);
+    if (i >= 0) t.docs.splice(i, 1);
+    return ok({ ok: true });
+  }
+
+  return bad("method_not_allowed", 405);
 };
