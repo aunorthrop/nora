@@ -1,5 +1,4 @@
-// Multi-tenant in-memory store (per lambda instance).
-// For persistence later, swap tenants Map to a DB (same API).
+// Multi-tenant in-memory store (hot runtime). Swap to a DB later.
 
 const tenants = globalThis.__NORA_TENANTS__ ||= new Map();
 
@@ -14,22 +13,23 @@ function ensureTenant(biz){
   if (!biz || typeof biz !== "string") throw new Error("businessId required");
   if (!tenants.has(biz)) {
     tenants.set(biz, {
+      // settings kept for future, no password enforcement now
       settings: { adminPass: null, onboardedAt: null },
-      directives: [], // business rules, no expiry
-      updates: [],    // time-sensitive
-      statics: []     // long-term
+      directives: [],
+      updates: [],
+      statics: [],
+      docs: [] // {id,name,size,text,createdAt}
     });
   }
   return tenants.get(biz);
 }
-
 function pruneExpired(biz){
   const t = ensureTenant(biz);
   const nowTs = now();
   t.updates = t.updates.filter(u => !u.expiresAt || u.expiresAt > nowTs);
 }
 
-// ---------- Settings ----------
+// Settings (optional; not required anymore)
 export function getSettings(biz){ return ensureTenant(biz).settings; }
 export function setAdminPass(biz, pass){
   const t = ensureTenant(biz);
@@ -38,7 +38,7 @@ export function setAdminPass(biz, pass){
   return true;
 }
 
-// ---------- Director rules ----------
+// Directives
 export function addDirective(biz, text){
   const t = ensureTenant(biz);
   const row = { id: uid(), type:"directive", text:String(text||"").trim(), createdAt: now() };
@@ -70,7 +70,7 @@ export function listRecentDirectiveChanges(biz){
   return t.directives.filter(d => d.createdAt >= cutoff).sort((a,b)=>b.createdAt - a.createdAt);
 }
 
-// ---------- Updates / Static ----------
+// Updates / Static
 export function addUpdate(biz, text){
   pruneExpired(biz);
   const t = ensureTenant(biz);
@@ -93,7 +93,6 @@ export function removeLast(biz, kind){
   if (kind === "update")  return t.updates.pop() ? 1 : 0;
   if (kind === "static" || kind === "note") return t.statics.pop() ? 1 : 0;
   if (kind === "directive") return removeLastDirective(biz);
-  // generic last across all three
   const a = t.updates[t.updates.length-1]?.createdAt || 0;
   const b = t.statics[t.statics.length-1]?.createdAt || 0;
   const c = t.directives[t.directives.length-1]?.createdAt || 0;
@@ -107,15 +106,16 @@ export function removeContaining(biz, needle){
   pruneExpired(biz);
   const t = ensureTenant(biz);
   const n = String(needle||"").toLowerCase();
-  const bu = t.updates.length, bs = t.statics.length, bd = t.directives.length;
+  const bu = t.updates.length, bs = t.statics.length, bd = t.directives.length, bdv = t.docs.length;
   t.updates    = t.updates.filter(u => !u.text.toLowerCase().includes(n));
   t.statics    = t.statics.filter(s => !s.text.toLowerCase().includes(n));
   t.directives = t.directives.filter(d => !d.text.toLowerCase().includes(n));
-  return (bu - t.updates.length) + (bs - t.statics.length) + (bd - t.directives.length);
+  t.docs       = t.docs.filter(d => !((d.name||"").toLowerCase().includes(n) || (d.text||"").toLowerCase().includes(n)));
+  return (bu - t.updates.length) + (bs - t.statics.length) + (bd - t.directives.length) + (bdv - t.docs.length);
 }
 export function clearAll(biz){
   const t = ensureTenant(biz);
-  t.updates = []; t.statics = []; t.directives = [];
+  t.updates = []; t.statics = []; t.directives = []; t.docs = [];
   return true;
 }
 export function listRecentForBrief(biz){
@@ -125,19 +125,49 @@ export function listRecentForBrief(biz){
   return t.updates.filter(u => u.createdAt >= cutoff).sort((a,b)=>b.createdAt - a.createdAt);
 }
 
-// ---------- Search ----------
+// Docs
+export function addDoc(biz, { name, size, text }){
+  const t = ensureTenant(biz);
+  const row = { id: uid(), name: String(name||"untitled"), size: Number(size||0), text: String(text||"").slice(0, 500_000), createdAt: now() };
+  t.docs.push(row);
+  return row;
+}
+export function listDocs(biz){
+  const t = ensureTenant(biz);
+  return [...t.docs].sort((a,b)=>b.createdAt - a.createdAt);
+}
+export function deleteDoc(biz, id){
+  const t = ensureTenant(biz);
+  const before = t.docs.length;
+  t.docs = t.docs.filter(d => d.id !== id);
+  return before !== t.docs.length;
+}
+export function listRecentDocAdds(biz){
+  const t = ensureTenant(biz);
+  const cutoff = now() - (BRIEF_WINDOW_HOURS * 60 * 60 * 1000);
+  return t.docs.filter(d => d.createdAt >= cutoff).sort((a,b)=>b.createdAt - a.createdAt);
+}
+
+// Search
 function scoreText(qTokens, text, createdAt, isUpdate){
   const t = tokenize(text);
   let overlap = 0; for (const tok of qTokens) if (t.includes(tok)) overlap++;
   let score = overlap;
   if (isUpdate) {
     const ageH = (now() - createdAt) / (60*60*1000);
-    const recencyBoost = Math.max(0, 4 - Math.log1p(ageH));
-    score += recencyBoost;
+    score += Math.max(0, 4 - Math.log1p(ageH));
   }
   return score;
 }
-export function searchRelevant(biz, query, { kUpdates = 3, kStatics = 3 } = {}){
+function snippetAround(text, qTokens, span=220){
+  const L = text.toLowerCase();
+  let idx = -1;
+  for (const tok of qTokens) { idx = L.indexOf(tok); if (idx >= 0) break; }
+  if (idx < 0) return text.slice(0, span);
+  const start = Math.max(0, idx - Math.floor(span/2));
+  return text.slice(start, start + span);
+}
+export function searchRelevant(biz, query, { kUpdates = 3, kStatics = 3, kDocs = 3 } = {}){
   pruneExpired(biz);
   const t = ensureTenant(biz);
   const q = tokenize(query);
@@ -146,19 +176,27 @@ export function searchRelevant(biz, query, { kUpdates = 3, kStatics = 3 } = {}){
     .filter(x => x._s > 0)
     .sort((a,b)=>b._s - a._s)
     .slice(0, kUpdates);
+
   const sts = t.statics
     .map(s => ({...s, _s: scoreText(q, s.text, s.createdAt, false)}))
     .filter(x => x._s > 0)
     .sort((a,b)=>b._s - a._s)
     .slice(0, kStatics);
-  return { updates: ups, statics: sts };
+
+  const dvs = t.docs
+    .map(d => ({...d, _s: scoreText(q, d.text || "", d.createdAt, false), _snippet: snippetAround(d.text || "", q) }))
+    .filter(x => x._s > 0)
+    .sort((a,b)=>b._s - a._s)
+    .slice(0, kDocs);
+
+  return { updates: ups, statics: sts, docs: dvs };
 }
 
-// ---------- Debug ----------
+// Snapshot for client
 export function snapshot(biz){
   const t = ensureTenant(biz);
   return {
-    counts: { directives: t.directives.length, updates: t.updates.length, statics: t.statics.length },
+    counts: { directives: t.directives.length, updates: t.updates.length, statics: t.statics.length, docs: t.docs.length },
     settings: { hasAdminPass: !!t.settings.adminPass, onboardedAt: t.settings.onboardedAt }
   };
 }
