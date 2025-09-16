@@ -1,8 +1,9 @@
 {
-  "name": "nora-voice-only",
+  "name": "nora-voice-director",
   "private": true,
   "type": "module",
   "dependencies": {
-    "undici": "^6.19.8"
+    "undici": "^6.19.8",
+    "pdf-parse": "^1.1.1"
   }
 }
