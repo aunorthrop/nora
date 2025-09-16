@@ -12,13 +12,9 @@
     font-family:-apple-system,BlinkMacSystemFont,Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;
     -webkit-user-select:none;user-select:none;touch-action:manipulation;
   }
-  /* Mic button */
-  .voice-button{
-    width:160px;height:160px;border:none;border-radius:32px;background:#151821;color:#d8e0f0;
-    box-shadow:0 8px 28px rgba(0,0,0,.35), inset 0 -3px 0 rgba(255,255,255,.06);
-    cursor:pointer;position:relative;transition:transform .06s ease, box-shadow .06s ease, background .15s ease, color .15s ease;
-    -webkit-tap-highlight-color:transparent;
-  }
+  .voice-button{width:160px;height:160px;border:none;border-radius:32px;background:#151821;color:#d8e0f0;
+    box-shadow:0 8px 28px rgba(0,0,0,.35), inset 0 -3px 0 rgba(255,255,255,.06);cursor:pointer;position:relative;
+    transition:transform .06s ease, box-shadow .06s ease, background .15s ease, color .15s ease;-webkit-tap-highlight-color:transparent}
   .voice-button:active,.voice-button.pressed{transform:scale(.98);box-shadow:inset 0 6px 16px rgba(0,0,0,.35),0 2px 6px rgba(0,0,0,.25)}
   .voice-button.idle{background:#151821;color:#d8e0f0}
   .voice-button.listening{background:#1b5fff;color:#fff;box-shadow:0 0 0 4px rgba(27,95,255,.25), 0 8px 28px rgba(0,0,0,.4)}
@@ -29,13 +25,11 @@
 
   /* Upload (+) top-right */
   .plus{position:fixed;top:14px;right:14px;z-index:3000}
-  .plus-btn{
-    width:44px;height:44px;border:none;border-radius:12px;background:#1b5fff;color:#fff;cursor:pointer;
-    box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:24px;line-height:44px;text-align:center
-  }
+  .plus-btn{width:44px;height:44px;border:none;border-radius:12px;background:#1b5fff;color:#fff;cursor:pointer;
+    box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:24px;line-height:44px;text-align:center}
   .plus-btn:active{transform:scale(.98)}
 
-  /* Paywall / team-code gate */
+  /* Gate (team code required) */
   .gate{position:fixed;inset:0;background:rgba(10,12,18,.92);display:flex;align-items:center;justify-content:center;padding:20px;z-index:5000}
   .gate-card{background:#141821;border:1px solid rgba(255,255,255,.07);border-radius:16px;max-width:520px;width:100%;padding:20px;box-shadow:0 18px 55px rgba(0,0,0,.45)}
   .h{font-weight:600;margin-bottom:6px}
@@ -52,24 +46,26 @@
   .meta{opacity:.85;font-size:13px}
   .file-choose{display:inline-block}
   .file-choose input{display:none}
-  /* NEW: lighter label color */
-  .file-choose label{
-    display:inline-block;background:#E6E9F2;color:#111;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer
-  }
+  /* lighter choose button */
+  .file-choose label{display:inline-block;background:#E6E9F2;color:#111;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer}
   .list{margin-top:12px;max-height:240px;overflow:auto;border-top:1px solid rgba(255,255,255,.06);padding-top:10px}
   .item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)}
   .bar{height:8px;background:#242936;border-radius:8px;overflow:hidden;margin-top:8px}
   .fill{height:100%;width:0;background:#1b5fff;transition:width .2s}
   .chk{margin-left:8px;color:#13c26b;font-size:14px}
 
-  .toast{position:fixed;bottom:12px;left:12px;background:#ff4d4f;color:#fff;padding:8px 10px;border-radius:10px;
-    font-size:12px;box-shadow:0 6px 18px rgba(0,0,0,.3);display:none;z-index:6000;max-width:80vw;white-space:pre-wrap}
+  /* Popup to show code after redirect */
+  .pop{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:20px;z-index:6000}
+  .pop.open{display:flex}
+  .pop-card{background:#141821;border:1px solid rgba(255,255,255,.07);border-radius:16px;max-width:520px;width:100%;padding:20px;box-shadow:0 18px 55px rgba(0,0,0,.45)}
+  .code{margin-top:10px;font-size:28px;font-weight:700;letter-spacing:2px;background:#0e1219;border-radius:12px;padding:14px 16px;text-align:center}
+  .toast{position:fixed;bottom:12px;left:12px;background:#ff4d4f;color:#fff;padding:8px 10px;border-radius:10px;font-size:12px;box-shadow:0 6px 18px rgba(0,0,0,.3);display:none;z-index:7000;max-width:80vw;white-space:pre-wrap}
 </style>
 </head>
 <body>
 
-<!-- mic button (only usable after a valid team code exists) -->
 <div class="plus"><button class="plus-btn" id="openUpload" aria-label="Upload files">＋</button></div>
+
 <button id="voiceBtn" class="voice-button idle" aria-label="Press to talk">
   <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
     <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c1.66 0 3 1.34 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/>
@@ -81,26 +77,32 @@
   <div class="card">
     <div class="row" style="justify-content:space-between"><div class="meta">Files</div><button class="btn" id="closeUpload">Close</button></div>
     <div class="row" style="margin-top:12px">
-      <div class="file-choose">
-        <input id="fileInput" type="file" multiple accept=".pdf,.txt,.md,.markdown"/>
-        <label for="fileInput">Choose files</label>
-      </div>
+      <div class="file-choose"><input id="fileInput" type="file" multiple accept=".pdf,.txt,.md,.markdown"/><label for="fileInput">Choose files</label></div>
     </div>
     <div id="uploadArea"></div>
     <div class="list" id="fileList"></div>
   </div>
 </div>
 
-<!-- Team-code paywall (always shown until a valid code is saved) -->
+<!-- Gate -->
 <div class="gate" id="gate">
   <div class="gate-card">
     <div class="h">Join your team on Nora</div>
     <div class="meta">Enter the 8-digit team code (####-####) you received after subscribing. Or subscribe now to create a new team.</div>
-    <div class="row">
-      <input id="teamCode" type="text" inputmode="numeric" pattern="[0-9]{4}-[0-9]{4}" placeholder="1234-5678"/>
-      <button class="btn" id="saveCode">Enter</button>
-    </div>
+    <div class="row"><input id="teamCode" type="text" inputmode="numeric" pattern="[0-9]{4}-[0-9]{4}" placeholder="1234-5678"/><button class="btn" id="saveCode">Enter</button></div>
     <div class="row"><button class="btn buy" id="buyBtn">Subscribe – $10/mo</button></div>
+  </div>
+</div>
+
+<!-- Popup: show code after successful purchase redirect -->
+<div class="pop" id="issuePop" aria-hidden="true">
+  <div class="pop-card">
+    <div class="h">Your team code</div>
+    <div class="code" id="issuedCode">0000-0000</div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="copyIssued">Copy</button>
+      <button class="btn buy" id="useIssued">Use this code</button>
+    </div>
   </div>
 </div>
 
@@ -108,243 +110,137 @@
 
 <script>
 (function(){
-  /* ---- crash guard ---- */
   var toast = document.getElementById('toast');
   function showErr(msg){ try{ toast.textContent = String(msg||'Error'); toast.style.display='block'; }catch(e){} console.error(msg); }
   window.onerror = function(msg, src, line, col, err){ showErr(msg + (err && err.stack ? ('\n' + err.stack) : '')); };
   window.onunhandledrejection = function(ev){ try{ showErr(''+(ev.reason && ev.reason.stack ? ev.reason.stack : ev.reason)); }catch(e){} };
 
   try{
-    /* ---- storage ---- */
-    var STORAGE_KEY = 'nora_business_code';
-    var ADMIN_ARM_KEY = 'nora_admin_armed';
-    function getBiz(){ try{ return localStorage.getItem(STORAGE_KEY) || ""; }catch(e){ return ""; } }
+    var STORAGE_KEY='nora_business_code', ADMIN_ARM_KEY='nora_admin_armed';
+    function getBiz(){ try{ return localStorage.getItem(STORAGE_KEY)||""; }catch(e){ return ""; } }
     function setBiz(v){ try{ localStorage.setItem(STORAGE_KEY, String(v||"").trim()); }catch(e){} }
-    function isAdminArmed(){ try{ return localStorage.getItem(ADMIN_ARM_KEY) === '1'; }catch(e){ return false; } }
-    function armAdmin(){ try{ localStorage.setItem(ADMIN_ARM_KEY, '1'); }catch(e){} }
+    function hasCode(){ return /^[0-9]{4}-[0-9]{4}$/.test(getBiz()); }
+    function isAdminArmed(){ try{ return localStorage.getItem(ADMIN_ARM_KEY)==='1'; }catch(e){ return false; } }
+    function armAdmin(){ try{ localStorage.setItem(ADMIN_ARM_KEY,'1'); }catch(e){} }
     function disarmAdmin(){ try{ localStorage.removeItem(ADMIN_ARM_KEY); }catch(e){} }
 
-    /* ---- dom ---- */
-    var gate = document.getElementById('gate');
-    var teamCodeInput = document.getElementById('teamCode');
-    var saveCodeBtn = document.getElementById('saveCode');
-    var buyBtn = document.getElementById('buyBtn');
+    var gate=document.getElementById('gate'); function updateGate(){ gate.style.display = hasCode()?'none':'flex'; } updateGate();
 
-    var voiceBtn = document.getElementById('voiceBtn');
-    var openUpload = document.getElementById('openUpload');
-    var uploadModal = document.getElementById('uploadModal');
-    var closeUpload = document.getElementById('closeUpload');
-    var fileInput = document.getElementById('fileInput');
-    var uploadArea = document.getElementById('uploadArea');
-    var fileList = document.getElementById('fileList');
+    // If we arrive with ?code=####-####, show a popup with that code
+    (function(){
+      var m = location.search.match(/[?&]code=([0-9]{4}-[0-9]{4})/);
+      if(!m) return;
+      var code = m[1];
+      var pop = document.getElementById('issuePop');
+      var issuedEl = document.getElementById('issuedCode');
+      issuedEl.textContent = code;
+      pop.classList.add('open'); pop.setAttribute('aria-hidden','false');
+      document.getElementById('copyIssued').onclick = async function(){ try{ await navigator.clipboard.writeText(code); this.textContent='Copied'; }catch(e){} };
+      document.getElementById('useIssued').onclick = function(){
+        setBiz(code); updateGate();
+        pop.classList.remove('open'); pop.setAttribute('aria-hidden','true');
+        history.replaceState(null,'','/'); // clean query
+      };
+    })();
 
-    function hasCode(){ return /^[0-9]{4}-[0-9]{4}$/.test(getBiz()); }
-    function updateGate(){ gate.style.display = hasCode() ? 'none' : 'flex'; }
-    updateGate();
-
-    saveCodeBtn.addEventListener('click', function(){
-      var v = (teamCodeInput.value||"").trim();
-      if(!/^[0-9]{4}-[0-9]{4}$/.test(v)) { showErr("Enter a code like 1234-5678"); return; }
+    var teamCodeInput=document.getElementById('teamCode');
+    document.getElementById('saveCode').addEventListener('click', function(){
+      var v=(teamCodeInput.value||"").trim();
+      if(!/^[0-9]{4}-[0-9]{4}$/.test(v)){ showErr("Enter a code like 1234-5678"); return; }
       setBiz(v); updateGate();
     });
-    buyBtn.addEventListener('click', function(){
-      // Hosted checkout link (Stripe)
-      window.location.href = "https://buy.stripe.com/14A14ng1E3Gn4BmceI5sA0b?prefilled_email=";
+    document.getElementById('buyBtn').addEventListener('click', function(){
+      location.href="https://buy.stripe.com/14A14ng1E3Gn4BmceI5sA0b";
     });
 
-    /* ---- audio session ---- */
-    var isSession=false,isListening=false,isProcessing=false,isSpeaking=false;
-    var audioCtx, micStream, recorder, chunks=[];
-    var inflight, sessionId=null;
-    var speaker = new Audio(); speaker.preload="none"; speaker.playsInline=true;
+    /* ===== mic + voice session (unchanged) ===== */
+    var voiceBtn=document.getElementById('voiceBtn');
+    var openUpload=document.getElementById('openUpload'), uploadModal=document.getElementById('uploadModal'),
+        closeUpload=document.getElementById('closeUpload'), fileInput=document.getElementById('fileInput'),
+        uploadArea=document.getElementById('uploadArea'), fileList=document.getElementById('fileList');
 
     function setState(cls){
-      voiceBtn.className = 'voice-button ' + cls;
-      var map = { idle:'Press to talk', listening:'Listening — tap to stop', thinking:'Working…', speaking:'Speaking — tap to interrupt', error:'Error — tap to retry' };
-      voiceBtn.setAttribute('aria-label', map[cls] || 'Press to talk');
+      voiceBtn.className='voice-button '+cls;
+      var map={idle:'Press to talk', listening:'Listening — tap to stop', thinking:'Working…', speaking:'Speaking — tap to interrupt', error:'Error — tap to retry'};
+      voiceBtn.setAttribute('aria-label', map[cls]||'Press to talk');
     }
+
+    var isSession=false,isListening=false,isProcessing=false,audioCtx,micStream,recorder,chunks=[],inflight,sessionId=null;
+
+    async function ensureAudio(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state!=='running') await audioCtx.resume(); }
     function getPreferredMime(){
-      var isiOS=/iPad|iPhone|iPod/.test(navigator.userAgent);
-      var isSafari=/Safari/.test(navigator.userAgent)&&!/Chrome/.test(navigator.userAgent);
-      if(isiOS||isSafari){
-        if(window.MediaRecorder && MediaRecorder.isTypeSupported('audio/mp4;codecs=mp4a.40.2')) return 'audio/mp4;codecs=mp4a.40.2';
-        if(window.MediaRecorder && MediaRecorder.isTypeSupported('audio/mp4')) return 'audio/mp4';
-      } else {
-        if(window.MediaRecorder && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) return 'audio/webm;codecs=opus';
-        if(window.MediaRecorder && MediaRecorder.isTypeSupported('audio/webm')) return 'audio/webm';
-      }
+      var isiOS=/iPad|iPhone|iPod/.test(navigator.userAgent), isSafari=/Safari/.test(navigator.userAgent)&&!/Chrome/.test(navigator.userAgent);
+      if(isiOS||isSafari){ if(window.MediaRecorder&&MediaRecorder.isTypeSupported('audio/mp4;codecs=mp4a.40.2')) return 'audio/mp4;codecs=mp4a.40.2';
+        if(window.MediaRecorder&&MediaRecorder.isTypeSupported('audio/mp4')) return 'audio/mp4'; }
+      else { if(window.MediaRecorder&&MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) return 'audio/webm;codecs=opus';
+        if(window.MediaRecorder&&MediaRecorder.isTypeSupported('audio/webm')) return 'audio/webm'; }
       return '';
     }
-    async function ensureAudio(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state!=='running') await audioCtx.resume(); }
     async function startListening(){
       if(!hasCode()){ updateGate(); return; }
       if(isListening||isProcessing) return;
       isListening=true; setState('listening');
       await ensureAudio();
-      micStream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:true }, video:false });
-      var mime = getPreferredMime(); var opts={}; if(mime) opts.mimeType=mime;
-      recorder = new MediaRecorder(micStream, opts);
-      chunks=[]; recorder.ondataavailable = function(e){ if(e.data && e.data.size>0) chunks.push(e.data); };
-      recorder.onstop = processRecording;
-      recorder.start(120);
+      micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
+      var mime=getPreferredMime(), opts={}; if(mime) opts.mimeType=mime;
+      recorder=new MediaRecorder(micStream,opts); chunks=[];
+      recorder.ondataavailable=function(e){ if(e.data&&e.data.size>0) chunks.push(e.data); };
+      recorder.onstop=processRecording; recorder.start(120);
     }
-    function stopListening(){
-      try{ if(recorder && recorder.state==='recording') recorder.stop(); }catch(e){}
-      try{ if(micStream){ micStream.getTracks().forEach(function(t){ t.stop(); }); } }catch(e){}
-      isListening=false;
-    }
+    function stopListening(){ try{ if(recorder&&recorder.state==='recording') recorder.stop(); }catch(e){} try{ if(micStream){ micStream.getTracks().forEach(function(t){ t.stop(); }); } }catch(e){} isListening=false; }
+    function blobToBase64(blob){ return new Promise(function(res,rej){ var r=new FileReader(); r.onloadend=function(){ try{ var s=String(r.result||''); res(s.split(',')[1]||''); }catch(e){ rej(e);} }; r.onerror=function(){ rej(r.error||new Error('readAsDataURL failed')); }; r.readAsDataURL(blob); }); }
     async function processRecording(){
       isListening=false; isProcessing=true; setState('thinking');
       try{
-        var blob = new Blob(chunks,{ type:(recorder && recorder.mimeType) ? recorder.mimeType : 'audio/webm' }); chunks=[];
+        var blob=new Blob(chunks,{type:(recorder&&recorder.mimeType)?recorder.mimeType:'audio/webm'}); chunks=[];
         if(!blob.size){ isProcessing=false; setState('idle'); return; }
-        var b64 = await blobToBase64(blob);
-        if(inflight && inflight.abort) inflight.abort(); inflight = new AbortController();
-
-        var payload = {
-          businessId: getBiz(),
-          sessionId: sessionId,
-          mode: isAdminArmed() ? 'admin-armed' : 'normal',
-          audio: { data:b64, mime: blob.type }
-        };
-
-        var resp = await fetch('/.netlify/functions/voice', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify(payload),
-          signal: inflight.signal
-        });
-        var data = {}; try{ data = await resp.json(); }catch(e){ data = {}; }
-
-        if(data && data.sessionId) sessionId = data.sessionId;
-        if(data && data.control){
-          if(data.control.adminArmed) armAdmin();
-          if(data.control.adminDisarm) disarmAdmin();
-          if(data.control.requireCode){ setBiz(""); updateGate(); }
-        }
-        if(data && data.audio){ await play(data.audio); } else { setState('idle'); }
-
-        isProcessing=false;
-        if(isSession) startListening();
-      }catch(e){
-        isProcessing=false; setState('error'); showErr(e && e.stack ? e.stack : e);
-      }
-    }
-    async function play(dataUrl){
-      try{
-        isSpeaking=true; setState('speaking');
-        var a = new Audio(); a.preload="none"; a.playsInline=true; a.src=dataUrl; await a.play();
-        await new Promise(function(r){ a.onended=r; });
-        isSpeaking=false; setState('idle');
-      }catch(e){ isSpeaking=false; setState('error'); showErr(e); }
-    }
-    function blobToBase64(blob){
-      return new Promise(function(res,rej){
-        var r=new FileReader();
-        r.onloadend=function(){ try{ var s=String(r.result||''); res(s.split(',')[1]||''); }catch(e){ rej(e); } };
-        r.onerror=function(){ rej(r.error||new Error('readAsDataURL failed')); };
-        r.readAsDataURL(blob);
-      });
-    }
-    async function runBriefThenListen(){
-      try{
-        if(!hasCode()){ updateGate(); return; }
-        setState('thinking');
-        var r = await fetch('/.netlify/functions/brief', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ businessId:getBiz() }) });
-        var j = {}; try{ j = await r.json(); }catch(e){ j={}; }
-        if(j && j.audio) await play(j.audio);
-        await startListening();
-      }catch(e){ await startListening(); }
+        var b64=await blobToBase64(blob); if(inflight&&inflight.abort) inflight.abort(); inflight=new AbortController();
+        var payload={ businessId:getBiz(), sessionId:sessionId, mode:isAdminArmed()?'admin-armed':'normal', audio:{data:b64,mime:blob.type} };
+        var resp=await fetch('/.netlify/functions/voice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal:inflight.signal});
+        var data={}; try{ data=await resp.json(); }catch(e){ data={}; }
+        if(data&&data.sessionId) sessionId=data.sessionId;
+        if(data&&data.control){ if(data.control.adminArmed) armAdmin(); if(data.control.adminDisarm) disarmAdmin(); if(data.control.requireCode){ setBiz(""); updateGate(); } }
+        if(data&&data.audio){ var a=new Audio(); a.preload="none"; a.playsInline=true; a.src=data.audio; await a.play(); await new Promise(function(r){ a.onended=r; }); setState('idle'); }
+        else setState('idle');
+        isProcessing=false; if(isSession) startListening();
+      }catch(e){ isProcessing=false; setState('error'); showErr(e&&e.stack?e.stack:e); }
     }
     voiceBtn.addEventListener('click', async function(e){
-      e.preventDefault();
-      if(!hasCode()){ updateGate(); return; }
-      if(!isSession){ isSession = true; sessionId = 'sess_' + Date.now(); runBriefThenListen();
+      e.preventDefault(); if(!hasCode()){ updateGate(); return; }
+      if(!isSession){ isSession=true; sessionId='sess_'+Date.now(); // brief
+        try{ setState('thinking'); var r=await fetch('/.netlify/functions/brief',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:getBiz()})}); var j={}; try{ j=await r.json(); }catch(e){} if(j&&j.audio){ var a=new Audio(); a.preload="none"; a.playsInline=true; a.src=j.audio; await a.play(); await new Promise(function(r2){ a.onended=r2; }); } }catch(e){}
+        startListening();
       }else{ stopListening(); isSession=false; setState('idle'); }
     });
 
-    /* ---- uploads ---- */
-    openUpload.addEventListener('click', function(){ if(!hasCode()){ updateGate(); return; } showUpload(); });
-    function showUpload(){ uploadModal.classList.add('open'); uploadModal.setAttribute('aria-hidden','false'); renderFileList(); }
-    closeUpload.addEventListener('click', function(){ uploadModal.classList.remove('open'); uploadModal.setAttribute('aria-hidden','true'); });
+    // Uploads
+    document.getElementById('openUpload').addEventListener('click', function(){ if(!hasCode()){ updateGate(); return; } uploadModal.classList.add('open'); uploadModal.setAttribute('aria-hidden','false'); renderFileList(); });
+    document.getElementById('closeUpload').addEventListener('click', function(){ uploadModal.classList.remove('open'); uploadModal.setAttribute('aria-hidden','true'); });
 
     fileInput.addEventListener('change', async function(){
-      var files = Array.from(fileInput.files || []); if(!files.length) return;
-      for (var i=0;i<files.length;i++){
-        var file = files[i];
-        if(file.size > 10*1024*1024){ showProgress(file.name, 'Too large (max 10MB)', 0, true); continue; }
-        var slot = showProgress(file.name, 'Reading…', 0);
+      var files=Array.from(fileInput.files||[]); if(!files.length) return;
+      for(var i=0;i<files.length;i++){
+        var file=files[i]; if(file.size>10*1024*1024){ showProgress(file.name,'Too large (max 10MB)',0,true); continue; }
+        var slot=showProgress(file.name,'Reading…',0);
         try{
-          var ext = (file.name.split('.').pop()||'').toLowerCase();
-          var textObj;
-          if(ext === 'pdf'){
-            updateProgress(slot, 8, 'Loading PDF engine…'); await ensurePdfJs();
-            textObj = await extractPdfText(file, function(p){ updateProgress(slot, p, 'Extracting…'); });
-          }else{
-            var t = await file.text(); textObj = { text: t }; updateProgress(slot, 60, 'Processing…');
-          }
-          updateProgress(slot, 70, 'Uploading…');
-          await uploadDoc(file.name, file.size, textObj.text);
-          updateProgress(slot, 100, 'Completed', true);
-        }catch(err){ updateProgress(slot, 0, 'Failed', true, true); showErr(err && err.stack ? err.stack : err); }
+          var ext=(file.name.split('.').pop()||'').toLowerCase(); var textObj;
+          if(ext==='pdf'){ updateProgress(slot,8,'Loading PDF engine…'); await ensurePdfJs(); textObj=await extractPdfText(file,function(p){ updateProgress(slot,p,'Extracting…'); }); }
+          else { var t=await file.text(); textObj={text:t}; updateProgress(slot,60,'Processing…'); }
+          updateProgress(slot,70,'Uploading…'); await uploadDoc(file.name,file.size,textObj.text); updateProgress(slot,100,'Completed',true);
+        }catch(err){ updateProgress(slot,0,'Failed',true,true); showErr(err&&err.stack?err.stack:err); }
       }
-      await renderFileList(); fileInput.value = '';
+      await renderFileList(); fileInput.value='';
     });
 
-    async function ensurePdfJs(){ if(window.pdfjsLib) return;
-      await new Promise(function(res,rej){ var s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.2.67/pdf.min.js'; s.async=true; s.onload=res; s.onerror=function(){ rej(new Error('Failed to load pdf.js')); }; document.head.appendChild(s); });
-    }
-    async function extractPdfText(file, onProg){
-      onProg(12); var buf = await file.arrayBuffer(); onProg(20);
-      var pdf = await window.pdfjsLib.getDocument({ data: buf }).promise; onProg(30);
-      var text=''; for(var p=1;p<=pdf.numPages;p++){ var page = await pdf.getPage(p); var cnt = await page.getTextContent(); var seg = cnt.items.map(function(it){ return it.str; }).join(' '); text += seg + '\n'; onProg(30 + Math.floor((p/pdf.numPages)*40)); }
-      return { text:text };
-    }
-    function showProgress(name, label, pct, done, error){
-      var wrap = document.createElement('div');
-      wrap.className='item';
-      wrap.innerHTML='<div class="meta">'+escapeHtml(name)+'</div>\
-      <div style="flex:1;margin-left:10px">\
-        <div class="bar"><div class="fill" style="width:'+ (pct||0) +'%"></div></div>\
-        <div class="meta">'+label+(done ? (error ? '' : ' <span class="chk">✔</span>') : '')+'</div>\
-      </div>';
-      uploadArea.prepend(wrap);   /* FIX: no stray identifier */
-      return wrap;
-    }
-    function updateProgress(slot, pct, label, done){
-      var fill = slot.querySelector('.fill'); if(fill) fill.style.width = (pct||0)+'%';
-      var metas = slot.querySelectorAll('.meta'); var meta = metas[metas.length-1];
-      if(meta && label) meta.innerHTML = label + (done ? ' <span class="chk">✔</span>' : '');
-    }
-    async function uploadDoc(name, size, text){
-      var r = await fetch('/.netlify/functions/files', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ businessId:getBiz(), name:name, size:size, text:text })
-      });
-      if(!r.ok) throw new Error('upload failed: '+r.status);
-      return r.json();
-    }
-    async function renderFileList(){
-      try{
-        var r = await fetch('/.netlify/functions/files?businessId=' + encodeURIComponent(getBiz()));
-        var j = {}; try{ j = await r.json(); }catch(e){ j={}; }
-        var docs = j.docs || [];
-        fileList.innerHTML = docs.length ? docs.map(function(d){
-          var kb = Math.round((d.size||0)/1024);
-          return '<div class="item"><div class="meta">'+escapeHtml(d.name)+' <span style="opacity:.6;font-size:12px">('+kb+' KB)</span></div><button class="btn" data-id="'+escapeHtml(d.id)+'">Remove</button></div>';
-        }).join('') : '<div class="meta" style="opacity:.75">No files uploaded yet.</div>';
-        var btns = fileList.querySelectorAll('button[data-id]');
-        for(var i=0;i<btns.length;i++){
-          btns[i].onclick = (function(b){ return async function(){
-            await fetch('/.netlify/functions/files?businessId='+encodeURIComponent(getBiz())+'&id='+encodeURIComponent(b.getAttribute('data-id')), { method:'DELETE' });
-            renderFileList();
-          }; })(btns[i]);
-        }
-      }catch(e){}
-    }
-    function escapeHtml(s){ return String(s||"").replace(/[&<>"']/g, function(m){ return ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" })[m]; }); }
+    async function ensurePdfJs(){ if(window.pdfjsLib) return; await new Promise(function(res,rej){ var s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.2.67/pdf.min.js'; s.async=true; s.onload=res; s.onerror=function(){ rej(new Error('Failed to load pdf.js')); }; document.head.appendChild(s); }); }
+    async function extractPdfText(file,onProg){ onProg(12); var buf=await file.arrayBuffer(); onProg(20); var pdf=await window.pdfjsLib.getDocument({data:buf}).promise; onProg(30); var text=''; for(var p=1;p<=pdf.numPages;p++){ var page=await pdf.getPage(p); var cnt=await page.getTextContent(); var seg=cnt.items.map(function(it){ return it.str; }).join(' '); text+=seg+'\n'; onProg(30+Math.floor((p/pdf.numPages)*40)); } return {text:text}; }
+    function showProgress(name,label,pct,done,error){ var wrap=document.createElement('div'); wrap.className='item'; wrap.innerHTML='<div class="meta">'+escapeHtml(name)+'</div><div style="flex:1;margin-left:10px"><div class="bar"><div class="fill" style="width:'+(pct||0)+'%"></div></div><div class="meta">'+label+(done?(error?'':' <span class="chk">✔</span>'):'')+'</div></div>'; uploadArea.prepend(wrap); return wrap; }
+    function updateProgress(slot,pct,label,done){ var fill=slot.querySelector('.fill'); if(fill) fill.style.width=(pct||0)+'%'; var metas=slot.querySelectorAll('.meta'); var meta=metas[metas.length-1]; if(meta&&label) meta.innerHTML=label+(done?' <span class="chk">✔</span>':''); }
+    async function uploadDoc(name,size,text){ var r=await fetch('/.netlify/functions/files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:getBiz(),name:name,size:size,text:text})}); if(!r.ok) throw new Error('upload failed: '+r.status); return r.json(); }
+    async function renderFileList(){ try{ var r=await fetch('/.netlify/functions/files?businessId='+encodeURIComponent(getBiz())); var j={}; try{ j=await r.json(); }catch(e){} var docs=j.docs||[]; fileList.innerHTML = docs.length ? docs.map(function(d){ var kb=Math.round((d.size||0)/1024); return '<div class="item"><div class="meta">'+escapeHtml(d.name)+' <span style="opacity:.6;font-size:12px">('+kb+' KB)</span></div><button class="btn" data-id="'+escapeHtml(d.id)+'">Remove</button></div>'; }).join('') : '<div class="meta" style="opacity:.75">No files uploaded yet.</div>'; var btns=fileList.querySelectorAll('button[data-id]'); for(var i=0;i<btns.length;i++){ btns[i].onclick=(function(b){ return async function(){ await fetch('/.netlify/functions/files?businessId='+encodeURIComponent(getBiz())+'&id='+encodeURIComponent(b.getAttribute('data-id')),{method:'DELETE'}); renderFileList(); }; })(btns[i]); } }catch(e){} }
+    function escapeHtml(s){ return String(s||"").replace(/[&<>"']/g,function(m){ return({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[m]; }); }
 
-  }catch(e){ showErr(e && e.stack ? e.stack : e); }
+  }catch(e){ showErr(e&&e.stack?e.stack:e); }
 })();
 </script>
 </body>
