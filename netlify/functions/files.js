@@ -1,42 +1,53 @@
-import { addDoc, listDocs, deleteDoc } from "./_shared/store.js";
-
-const hdrs = {
-  "Content-Type":"application/json",
-  "Access-Control-Allow-Origin":"*",
-  "Access-Control-Allow-Headers":"Content-Type",
-  "Access-Control-Allow-Methods":"GET,POST,DELETE,OPTIONS"
-};
-
+// Simple in-memory file store per businessId
 export const handler = async (event) => {
-  try{
-    if (event.httpMethod === "OPTIONS") return { statusCode:200, headers:hdrs, body: JSON.stringify({ ok:true }) };
+  const headers = {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
+  };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers, body: "{}" };
+
+  const store = globalThis.__NORA_DOCS__ || (globalThis.__NORA_DOCS__ = new Map());
+
+  try {
+    const url = new URL(event.rawUrl || `https://x${event.path}${event.queryStringParameters ? "?" + new URLSearchParams(event.queryStringParameters).toString() : ""}`);
+    const businessId = (url.searchParams.get("businessId") || "").trim();
+    if (!businessId) return { statusCode: 400, headers, body: JSON.stringify({ error: "businessId required" }) };
 
     if (event.httpMethod === "GET") {
-      const businessId = event.queryStringParameters?.businessId || "";
-      if (!businessId) return reply(400, { error:"Missing businessId" });
-      return reply(200, { docs: listDocs(businessId) });
-    }
-
-    if (event.httpMethod === "DELETE") {
-      const businessId = event.queryStringParameters?.businessId || "";
-      const id = event.queryStringParameters?.id || "";
-      if (!businessId || !id) return reply(400, { error:"Missing businessId or id" });
-      const ok = deleteDoc(businessId, id);
-      return reply(200, { ok });
+      const docs = Array.from(store.get(businessId) || []);
+      return { statusCode: 200, headers, body: JSON.stringify({ docs }) };
     }
 
     if (event.httpMethod === "POST") {
       const body = JSON.parse(event.body || "{}");
-      const { businessId, name, size, text } = body;
-      if (!businessId || !name || typeof size !== "number" || !text) return reply(400, { error:"Missing fields" });
-      const row = addDoc(businessId, { name, size, text });
-      return reply(200, { doc: row });
+      const name = String(body.name || "").slice(0, 180);
+      const size = Number(body.size || 0);
+      const text = String(body.text || "");
+      if (!name || !text) return { statusCode: 400, headers, body: JSON.stringify({ error: "name and text required" }) };
+
+      const docs = store.get(businessId) || [];
+      const id = Math.random().toString(36).slice(2, 10);
+      docs.push({ id, name, size, text, ts: Date.now() });
+      // prune to last 50
+      while (docs.length > 50) docs.shift();
+      store.set(businessId, docs);
+
+      return { statusCode: 200, headers, body: JSON.stringify({ ok: true, id }) };
     }
 
-    return reply(405, { error:"Method Not Allowed" });
-  }catch(e){
-    return reply(500, { error: String(e.message||e) });
+    if (event.httpMethod === "DELETE") {
+      const id = (new URL(event.rawUrl)).searchParams.get("id");
+      if (!id) return { statusCode: 400, headers, body: JSON.stringify({ error: "id required" }) };
+      const docs = store.get(businessId) || [];
+      const next = docs.filter(d => d.id !== id);
+      store.set(businessId, next);
+      return { statusCode: 200, headers, body: JSON.stringify({ ok: true }) };
+    }
+
+    return { statusCode: 405, headers, body: JSON.stringify({ error: "Method not allowed" }) };
+  } catch (e) {
+    return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
   }
 };
-
-function reply(statusCode, data){ return { statusCode, headers:hdrs, body: JSON.stringify(data) }; }
