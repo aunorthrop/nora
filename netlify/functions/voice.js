@@ -5,7 +5,7 @@ const CHAT_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const STT_MODEL  = "whisper-1";
 const TTS_MODEL  = "tts-1";
 const OPENAI_TTS_VOICE  = process.env.OPENAI_TTS_VOICE || "shimmer";
-const OPENAI_TTS_SPEED  = parseFloat(process.env.OPENAI_TTS_SPEED || "0.9"); // a little slower by default
+const OPENAI_TTS_SPEED  = parseFloat(process.env.OPENAI_TTS_SPEED || "1.0"); // natural baseline
 
 const UPDATES_TTL_HOURS  = Number(process.env.UPDATES_TTL_HOURS  || 168);
 const BRIEF_WINDOW_HOURS = Number(process.env.BRIEF_WINDOW_HOURS || 24);
@@ -36,15 +36,14 @@ export const handler = async (event) => {
     // INTRO request from client
     if (body.intro) {
       const text = introText();
-      return speak(state, text, { control:{ intro:true }, tts:{ speed: 0.88 }});
+      return speak(state, text, { control:{ intro:true }, tts:{ speed: 0.98 }}); // slightly slower, not robotic
     }
 
-    // For regular path we need audio
     const roleClient = String(body.role||"employee");
     const audio = body.audio||{};
     if (!audio.data || !audio.mime) return speak(state, "I’m listening—try again.");
 
-    // --- STT with format retries ---
+    // --- STT robust ---
     let transcript = "";
     try { transcript = await transcribeRobust(audio.data, audio.mime); }
     catch { return speak(state, "I couldn’t hear that—try again."); }
@@ -52,12 +51,12 @@ export const handler = async (event) => {
     if (!raw) return speak(state, "I’m listening—try again.");
     const lower = raw.toLowerCase();
 
-    // Help / repeat intro on demand
+    // Help / repeat intro
     if (/\b(help|how do i|how to|instructions|intro)\b/.test(lower)){
-      return speak(state, introText(), { tts:{ speed:0.88 }});
+      return speak(state, introText(), { tts:{ speed:0.98 }});
     }
 
-    // Quick role switching
+    // Role switching
     if (ADMIN_ON_RE.test(lower) && roleClient !== "admin") {
       return speak(state, "Admin mode on. Go ahead with your update.", { control:{ role:"admin" }});
     }
@@ -84,7 +83,6 @@ export const handler = async (event) => {
 
     // --- ADMIN branch ---
     if (roleClient === "admin") {
-      // Owner asking a question
       const looksQ = /[?]$/.test(raw) || /\b(what|when|where|who|why|how|which|do we|can we|should we)\b/i.test(raw);
       if (looksQ) {
         const a = await answerFromMemory(state, raw);
@@ -92,7 +90,6 @@ export const handler = async (event) => {
         return speak(state, a);
       }
 
-      // Delete / forget
       if (/^(delete|remove|forget)\b/i.test(raw)) {
         const tail = raw.replace(/^(delete|remove|forget)\b[:\-]?\s*/i,"").trim();
         if (!tail) return speak(state, "Tell me what to delete.");
@@ -100,7 +97,6 @@ export const handler = async (event) => {
         return speak(state, rm ? pick(ACK_DELETE) : "I didn’t find that.");
       }
 
-      // Save (infer long-term vs “today”)
       const isLongTerm =
         /(\bpermanent\b|\balways\b|\bpolicy\b|\bhandbook\b|\bprocedure\b|\bhours\b|\baddress\b|\bphone\b|\bsafety\b|\bmenu\b|\bforever\b|\bpersist\b|\bgeneral info\b)/i.test(raw) ||
         /^(remember|save|store|keep|log)\b/i.test(raw);
@@ -133,11 +129,10 @@ export const handler = async (event) => {
 
 // ---------------- helpers ----------------
 function introText(){
-  // short, natural, and slowish (handled by TTS speed)
-  return "Hey, I’m Nora. Tap the button to talk; tap again to pause. "
-    + "If you’re the owner, say “admin”, then tell me the update—like hours, Wi-Fi, or anything the team should know. I’ll remember it. "
-    + "Team members can ask “what’s new?” or ask about saved info, like “what’s our Wi-Fi?”. "
-    + "You can also say “repeat” to hear the last thing. Ready when you are.";
+  return "Hi, I’m Nora. Tap the button once to turn me on—then we just talk. "
+    + "If you’re the owner, say “admin” and tell me the updates. I’ll remember them. "
+    + "Team members can ask “what’s new?” or anything we’ve saved, like Wi-Fi or hours. "
+    + "Tap again to turn me off.";
 }
 function pick(a){ return a[Math.floor(Math.random()*a.length)] || a[0]; }
 function prune(state){
@@ -250,5 +245,5 @@ async function tts(text, opts={}){
   const b64 = Buffer.from(await r.arrayBuffer()).toString("base64");
   return `data:audio/mpeg;base64,${b64}`;
 }
-function sculpt(t){ let s=String(t||"").trim(); s=s.replace(/([.!?])\s+/g,"$1  "); if(!/[.!?…]$/.test(s)) s+="."; return s.slice(0,4000); }
+function sculpt(t){ let s=String(t||"").trim(); s=s.replace(/([.!?])\s+/g,"$1 "); if(!/[.!?…]$/.test(s)) s+="."; return s.slice(0,4000); }
 async function speak(state, text, extra){ state.lastSay=text; const audio=await tts(text, extra?.tts||{}); return json({audio, ...(extra||{})}); }
