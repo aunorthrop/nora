@@ -1,6 +1,7 @@
 import {
   listRecentForBrief,
   listRecentDirectiveChanges,
+  listRecentDocAdds,
   snapshot
 } from "./_shared/store.js";
 
@@ -24,33 +25,31 @@ export const handler = async (event) => {
     const businessId = body.businessId;
     if (!businessId) return { statusCode:400, headers:hdrs, body: JSON.stringify({ error:"Missing businessId" }) };
 
-    // First-time onboarding check
     const snap = snapshot(businessId);
     const isFresh = !snap.settings.hasAdminPass &&
                     snap.counts.directives === 0 &&
                     snap.counts.updates === 0 &&
-                    snap.counts.statics === 0;
+                    snap.counts.statics === 0 &&
+                    snap.counts.docs === 0;
 
     let say;
-
     if (isFresh) {
-      // Explicit onboarding question
-      say = "Welcome to Nora. Are you the admin or an employee? " +
-            "If you are the admin, say “activate admin mode” to set a password and add updates. " +
-            "If you’re an employee, you’ll hear updates when available and can ask questions about team info.";
+      say = "Welcome to Nora. Are you the admin or an employee? If you’re the admin, just say “admin” to begin adding updates or upload files with the plus button.";
     } else {
-      const updates = listRecentForBrief(businessId);
-      const dirChanges = listRecentDirectiveChanges(businessId);
+      const updates   = listRecentForBrief(businessId);
+      const dirChanges= listRecentDirectiveChanges(businessId);
+      const docAdds   = listRecentDocAdds(businessId);
 
-      if (!updates.length && !dirChanges.length) {
+      if (!updates.length && !dirChanges.length && !docAdds.length) {
         say = "No new updates or policy changes. Ask me anything you need.";
       } else {
         const lines = [
-          ...(dirChanges.slice(0, 4).map(d => `Policy: ${d.text}`)),
-          ...(updates.slice(0, 6).map(u => `Update: ${u.text}`))
+          ...dirChanges.slice(0,3).map(d => `Policy: ${d.text}`),
+          ...updates.slice(0,5).map(u => `Update: ${u.text}`),
+          ...docAdds.slice(0,3).map(d => `Doc added: ${d.name}`)
         ];
-        const sys = `You write a spoken brief for a team. 2–4 compact sentences. Mention policy changes first if any. End with: "Ask me anything."`;
-        const user = `Summarize these:\n${lines.map(l=>`- ${l}`).join("\n")}`;
+        const sys = `You write a spoken brief for a team. 2–4 concise sentences. Prioritize policy changes, then updates, then newly added docs. End with: "Ask me anything."`;
+        const user= `Summarize:\n${lines.map(l=>`- ${l}`).join("\n")}`;
 
         const r = await fetch(`${OPENAI_ROOT}/chat/completions`, {
           method:"POST",
