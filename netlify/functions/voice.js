@@ -1,149 +1,178 @@
-// Minimal, sturdy voice function with intro + TTS and a GET /?ping=1 health check
-
+// Nora voice function — server TTS intro, STT→Chat→TTS replies, flexible admin verbs, team-scoped memory
+// Requires env: OPENAI_API_KEY
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_ROOT = "https://api.openai.com/v1";
 
 const CHAT_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const STT_MODEL  = "whisper-1";
 const TTS_MODEL  = "tts-1";
-const OPENAI_TTS_VOICE  = process.env.OPENAI_TTS_VOICE || "alloy";
-const OPENAI_TTS_SPEED  = parseFloat(process.env.OPENAI_TTS_SPEED || "1.0");
+const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || "shimmer"; // higher, brighter by default
+const OPENAI_TTS_SPEED = parseFloat(process.env.OPENAI_TTS_SPEED || "0.96");
 
-const DB = globalThis.__NORA_TEAMS__ || (globalThis.__NORA_TEAMS__ = new Map());
-const now = () => Date.now();
-function team(id){ if(!DB.has(id)) DB.set(id,{updates:[],longterm:[],lastSay:""}); return DB.get(id); }
-function isCode(s){ return /^[0-9]{4}-[0-9]{4}$/.test(String(s||"")); }
-
-const json = (b, s=200) => ({ statusCode:s, headers:{
+// In-memory store (per lambda instance). Good enough for dev; swap to Redis/Supabase for prod.
+const DB = globalThis.__NORA_DB__ || (globalThis.__NORA_DB__ = new Map());
+function teamState(code){ if(!DB.has(code)) DB.set(code,{ updates:[], longterm:[], lastTs:Date.now() }); return DB.get(code); }
+const ok = (b)=>resp(200,b);
+const err = (s,b)=>resp(s,b);
+function resp(s, b){ return { statusCode:s, headers:{
   "Content-Type":"application/json",
   "Access-Control-Allow-Origin":"*",
   "Access-Control-Allow-Headers":"Content-Type",
-  "Access-Control-Allow-Methods":"GET,POST,OPTIONS"
-}, body:JSON.stringify(b) });
+  "Access-Control-Allow-Methods":"POST,OPTIONS"
+}, body:JSON.stringify(b)}}
+const isCode = s => /^[0-9]{4}-[0-9]{4}$/.test(String(s||""));
 
 exports.handler = async (event) => {
-  // CORS / health
-  if (event.httpMethod === "OPTIONS") return json({ok:true});
-  if (event.httpMethod === "GET") {
-    const ping = new URLSearchParams(event.rawQuery || event.queryStringParameters || {}).get("ping");
-    return json({ ok:true, ping: !!ping, ts: Date.now() });
-  }
-
+  if (event.httpMethod === "OPTIONS") return ok({ok:true});
   try{
+    if (!OPENAI_API_KEY) return err(500,{error:"OPENAI_API_KEY missing"});
     const body = JSON.parse(event.body||"{}");
     const code = body.businessId;
-    if (!isCode(code)) return json({ error:"missing_or_bad_team_code", control:{requireCode:true} });
+    if (!isCode(code)) return ok({ error:"missing_or_bad_team_code", control:{requireCode:true} });
+    const state = teamState(code);
 
-    const state = team(code);
-
-    // INTRO path
-    if (body.intro) {
-      const text = "Hi, I’m Nora. I’m on. If you’re the owner, say admin and give updates—I'll remember them. Team members can ask what’s new or anything we’ve saved. Tap again to turn me off.";
-      const audio = await safeTTS(text).catch(()=>null);
-      return json(audio ? { audio, response:text } : { audio:null, response:text });
+    // Direct TTS request (when client has text but no audio)
+    if (typeof body.say === "string" && body.say.trim()){
+      const audio = await tts(body.say);
+      return ok({ audio, response: body.say });
     }
 
-    // Requires audio
-    const audio = body.audio||{};
-    if (!audio.data || !audio.mime) return json({ audio:null, response:"I’m listening—try again." });
+    // Intro request — always produce server TTS
+    if (body.intro){
+      const text = introText();
+      const audio = await tts(text);
+      return ok({ audio, response:text });
+    }
 
-    const transcript = await transcribe(audio.data, audio.mime).catch(()=> "");
-    const raw = (transcript||"").trim();
-    if (!raw) return json({ audio:null, response:"I couldn’t hear that—try again." });
+    // Normal speech turn
+    const audioIn = body.audio;
+    const role = String(body.role || "employee");
+    if (!audioIn?.data || !audioIn?.mime) return ok({ audio:null, response:"I’m listening—try again." });
 
-    const lower = raw.toLowerCase();
+    const userText = (await stt(audioIn.data, audioIn.mime)).trim();
+    if (!userText) return ok({ audio:null, response:"I couldn’t hear that—try again." });
 
-    // Role intents
-    if (/\b(admin( mode)?|i'?m the admin|i am admin)\b/.test(lower))
-      return say(state, "Admin mode on. Go ahead with your update.", { control:{ role:"admin" }});
-    if (/\b(employee( mode)?)\b/.test(lower))
-      return say(state, "Okay—this device is employee.", { control:{ role:"employee" }});
+    // Role switching by phrase
+    const lower = userText.toLowerCase();
+    if (/\b(admin( mode)?|i'?m the admin|i am admin)\b/.test(lower)) {
+      const say = "Admin mode active. Go ahead with your update—I'll remember it.";
+      return ok({ ...(await sayTTS(say)), control:{role:"admin"} });
+    }
+    if (/\b(employee( mode)?|i'?m (an )?employee)\b/.test(lower)) {
+      const say = "Okay, this device is set to employee.";
+      return ok({ ...(await sayTTS(say)), control:{role:"employee"} });
+    }
 
-    // Admin add/remove
-    const role = String(body.role||"employee");
+    // Admin commands (flexible verbs)
     if (role === "admin") {
-      if (/^(remember|save|add|note|store|keep|log)\b/i.test(raw)) {
-        const cleaned = raw.replace(/^(remember|save|add|note|store|keep|log)\b[:,\-\s]*/i,"").trim();
-        state.updates.push({ text: cleaned||raw, ts: now() });
-        return say(state, "Saved.");
+      if (/^(remember|save|add|note|store|keep|log|write|record)\b/i.test(userText)) {
+        const cleaned = userText.replace(/^(remember|save|add|note|store|keep|log|write|record)\b[:,\-\s]*/i,"").trim();
+        state.updates.push({ text: cleaned || userText, ts: Date.now() });
+        state.lastTs = Date.now();
+        return sayTTS("Saved.");
       }
-      if (/^(delete|forget|remove)\b/i.test(raw)) {
-        const cleaned = raw.replace(/^(delete|forget|remove)\b[:,\-\s]*/i,"").trim();
+      if (/^(forget|remove|delete|clear|drop)\b/i.test(userText)) {
+        const cleaned = userText.replace(/^(forget|remove|delete|clear|drop)\b[:,\-\s]*/i,"").trim();
         state.updates = state.updates.filter(u => u.text.toLowerCase() !== cleaned.toLowerCase());
-        return say(state, "Removed.");
+        state.lastTs = Date.now();
+        return sayTTS("Removed.");
       }
     }
 
-    // Team asks
-    if (/\b(what('?| i)s new|any updates)\b/i.test(lower)) {
+    // Quick built-ins
+    if (/\b(what('?| i)s new|any updates|latest)\b/i.test(lower)) {
       const recent = state.updates.slice(-8).map(u=>"• "+u.text).join("  ");
-      return say(state, recent ? "Latest: " + recent : "No new updates.");
+      const say = recent ? `Latest: ${recent}` : "No new updates.";
+      return sayTTS(say);
     }
     if (/^(what did you (just )?add|what did you note|what do you have)/i.test(lower)) {
-      const recent = state.updates.slice(-5).map(u=>"• "+u.text).join("  ");
-      return say(state, recent ? "I have: " + recent : "Nothing saved yet.");
+      const recent = state.updates.slice(-6).map(u=>"• "+u.text).join("  ");
+      const say = recent ? `I have: ${recent}` : "Nothing saved yet.";
+      return sayTTS(say);
     }
 
-    // Naive memory Q&A
-    const answer = answerFromMemory(state, raw);
-    return say(state, answer || "I don’t have that yet.");
+    // Smart answer via Chat over your memory
+    const memList = [
+      ...state.longterm.map(x=>`• ${x.text}`),
+      ...state.updates.slice(-40).map(x=>`• ${x.text}`)
+    ].join("\n");
+
+    const sys = [
+      "You are Nora, a voice-first team assistant.",
+      "Primary goals: 1) speak concisely and naturally, 2) prioritize owner/admin updates, 3) answer employees using saved info only.",
+      "Never invent policy. If unsure, say you don't have that yet and suggest the admin add it.",
+      "Style: warm, brief, helpful. 1–3 sentences per reply.",
+      "If the user says “admin” at any time, they intend to give updates.",
+      "Use plain language. Avoid filler. If asked to summarize updates, list bullets succinctly."
+    ].join(" ");
+
+    const prompt = [
+      "Saved context (latest first):",
+      memList || "(none yet)",
+      "",
+      "User asks:",
+      userText
+    ].join("\n");
+
+    const reply = await chat(sys, prompt);
+    return sayTTS(reply || "I don’t have that yet.");
 
   } catch (e) {
     console.error(e);
-    return json({ error:"server_error" }, 500);
+    return err(500,{error:"server_error"});
   }
 };
 
-// ------- helpers
-function answerFromMemory(state, q){
-  const pool = [...state.longterm.map(x=>x.text), ...state.updates.map(x=>x.text)];
-  if(!pool.length) return "";
-  const qs = toks(q); let best="", score=-1;
-  for(const t of pool){
-    const ts=toks(t); let overlap=0; for(const w of qs) if(ts.has(w)) overlap++;
-    const s = overlap / Math.max(1, Math.min(qs.size, ts.size));
-    if(s>score){ score=s; best=t; }
-  }
-  return score>0 ? best : "";
-}
-function toks(s){ return new Set(String(s||"").toLowerCase().replace(/[^a-z0-9\s]/g," ").split(/\s+/).filter(Boolean)); }
-
-async function say(state, text, extra={}){
-  state.lastSay = text;
-  let audio=null;
-  try{ audio = await safeTTS(text); }catch{}
-  return json(audio ? { audio, response:text, ...extra } : { audio:null, response:text, ...extra });
+// ---------- Helpers ----------
+async function sayTTS(text){
+  return { audio: await tts(text), response: text };
 }
 
-async function transcribe(b64, mime){
-  const data = Buffer.from(b64,"base64");
-  if (data.length < 600) return "";
+async function stt(b64, mime){
+  const buf = Buffer.from(b64,"base64");
+  if (buf.length < 600) return "";
   const fd = new FormData();
   fd.set("model", STT_MODEL);
   fd.set("temperature","0");
-  fd.set("file", new Blob([data], { type: mime || "application/octet-stream" }), "audio.webm");
+  fd.set("file", new Blob([buf], { type: mime || "application/octet-stream" }), "audio.webm");
   const r = await fetch(`${OPENAI_ROOT}/audio/transcriptions`,{
-    method:"POST",
-    headers:{ Authorization: `Bearer ${OPENAI_API_KEY}` },
-    body: fd
+    method:"POST", headers:{ Authorization:`Bearer ${OPENAI_API_KEY}` }, body: fd
   });
   if(!r.ok) throw new Error(`STT ${r.status}`);
   const j = await r.json();
-  return (j.text||"").trim();
+  return (j.text||"");
 }
 
-async function safeTTS(text){
-  if(!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY missing");
+async function tts(text){
   const r=await fetch(`${OPENAI_ROOT}/audio/speech`,{
     method:"POST",
     headers:{ Authorization:`Bearer ${OPENAI_API_KEY}`, "Content-Type":"application/json" },
     body:JSON.stringify({
-      model:TTS_MODEL, voice:OPENAI_TTS_VOICE,
+      model:TTS_MODEL,
+      voice:OPENAI_TTS_VOICE,       // default shimmer (brighter)
       input: String(text||"").slice(0,4000),
-      response_format:"mp3", speed: Math.max(0.85, Math.min(1.15, OPENAI_TTS_SPEED))
+      response_format:"mp3",
+      speed: Math.max(0.8, Math.min(1.15, OPENAI_TTS_SPEED))
     })
   });
   if(!r.ok) throw new Error(`TTS ${r.status}`);
   const b64 = Buffer.from(await r.arrayBuffer()).toString("base64");
   return `data:audio/mpeg;base64,${b64}`;
+}
+
+async function chat(system, user){
+  const r = await fetch(`${OPENAI_ROOT}/chat/completions`,{
+    method:"POST",
+    headers:{ Authorization:`Bearer ${OPENAI_API_KEY}`, "Content-Type":"application/json" },
+    body:JSON.stringify({ model: CHAT_MODEL, temperature:0.3, max_tokens:180,
+      messages:[ {role:"system", content:system}, {role:"user", content:user} ]
+    })
+  });
+  if(!r.ok) throw new Error(`CHAT ${r.status}`);
+  const j = await r.json();
+  return j.choices?.[0]?.message?.content?.trim() || "";
+}
+
+function introText(){
+  return "Hi, I’m Nora. I’m on. If you’re the owner, say “admin” and give me the updates and policies—I'll remember them. Team members can ask “what’s new?” or any saved details. Tap again to turn me off.";
 }
