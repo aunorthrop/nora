@@ -1,154 +1,196 @@
-// Nora voice brain – admin updates + employee Q&A + OpenAI STT/TTS
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY missing");
+// Nora voice brain: STT -> intent router (admin/employee) -> TTS
+// No external deps (works on Netlify Functions / Node 18)
 
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_ROOT = "https://api.openai.com/v1";
+
 const CHAT_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const STT_MODEL = "whisper-1";
 const TTS_MODEL = "tts-1";
 const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || "shimmer";
 
+// Keep recent updates for N hours (employees hear "what's new?")
+const UPDATES_TTL_HOURS = Number(process.env.UPDATES_TTL_HOURS || 168); // 7 days default
 const BRIEF_WINDOW_HOURS = Number(process.env.BRIEF_WINDOW_HOURS || 24);
-const ADMIN_ARM_MIN = 8;
 
-const mem = globalThis.__NORA_MEM__ || (globalThis.__NORA_MEM__ = new Map());
-const admins = globalThis.__NORA_ADM__ || (globalThis.__NORA_ADM__ = new Map());
-function getDocsMap(){ return globalThis.__NORA_DOCS__ || (globalThis.__NORA_DOCS__ = new Map()); }
+const db = globalThis.__NORA_TEAMS__ || (globalThis.__NORA_TEAMS__ = new Map());
 
-function now(){ return Date.now(); }
-function isValidCode(code){ return /^[0-9]{4}-[0-9]{4}$/.test(code || ""); }
-function getTeam(businessId){ let t = mem.get(businessId); if(!t){ t={updates:[],longterm:[]}; mem.set(businessId,t);} return t; }
-function armAdmin(businessId){ admins.set(businessId, { until: now() + ADMIN_ARM_MIN*60*1000 }); }
-function isAdminArmed(businessId){ const a = admins.get(businessId); return a && a.until > now(); }
-function disarmAdmin(businessId){ admins.delete(businessId); }
+function team(biz) {
+  if (!db.has(biz)) db.set(biz, { updates: [], longterm: [], docs: [] });
+  return db.get(biz);
+}
+function isCode(code) { return /^[0-9]{4}-[0-9]{4}$/.test(String(code || "")); }
+const now = () => Date.now();
 
-function reply(statusCode, data){
+function sanitizeMime(m) {
+  const s = String(m || "").toLowerCase();
+  if (s.includes("webm")) return "audio/webm";
+  if (s.includes("m4a")) return "audio/m4a";
+  if (s.includes("mp4")) return "audio/mp4";
+  if (s.includes("mp3")) return "audio/mpeg";
+  if (s.includes("wav")) return "audio/wav";
+  if (s.includes("ogg") || s.includes("oga")) return "audio/ogg";
+  return "audio/webm";
+}
+function extFor(m) {
+  const s = String(m || "").toLowerCase();
+  if (s.includes("webm")) return ".webm";
+  if (s.includes("m4a")) return ".m4a";
+  if (s.includes("mp4")) return ".mp4";
+  if (s.includes("mp3")) return ".mp3";
+  if (s.includes("wav")) return ".wav";
+  if (s.includes("ogg") || s.includes("oga")) return ".ogg";
+  return ".webm";
+}
+
+function json(body, status = 200) {
   return {
-    statusCode,
+    statusCode: status,
     headers: {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Headers": "Content-Type",
     },
-    body: JSON.stringify(data),
+    body: JSON.stringify(body),
   };
 }
 
 export const handler = async (event) => {
-  if (event.httpMethod === "OPTIONS") return reply(200, { ok:true });
-
+  if (event.httpMethod === "OPTIONS") return json({ ok: true });
   try {
     const body = JSON.parse(event.body || "{}");
     const businessId = body.businessId;
-    const mode = body.mode || "normal";
-    const audio = body.audio || null;
+    const sessionId = body.sessionId || "s" + Date.now();
+    const mode = String(body.mode || "normal");
 
-    if (!isValidCode(businessId)) {
-      return reply(200, { error:"missing_or_bad_team_code", control:{ requireCode:true } });
+    if (!isCode(businessId)) {
+      return json({ error: "missing_or_bad_team_code", control: { requireCode: true } });
+    }
+    const audio = body.audio || {};
+    if (!audio.data || !audio.mime) return json({ error: "no_audio" });
+
+    // --- STT ---
+    let transcript = "";
+    try {
+      transcript = await transcribe(audio.data, audio.mime);
+    } catch (e) {
+      return json({ error: "STT " + (e.message || "failed") });
+    }
+    const raw = (transcript || "").trim();
+    if (!raw) {
+      const audioUrl = await tts("I didn’t catch that. Try again a little closer to the mic.");
+      return json({ audio: audioUrl });
     }
 
-    // silent ping (no audio) -> say ready
-    if (!audio?.data || !audio?.mime) {
-      const say = "I’m ready. If you’re the admin, say “admin” to add updates.";
-      const tts = await ttsSay(say);
-      return reply(200, { sessionId: "sess_" + now(), response: say, audio: tts });
+    // --- INTENT ROUTER ---
+    const t = raw.toLowerCase();
+    const state = team(businessId);
+
+    // 1) arming admin
+    if (/^(admin|i am the admin)\b/.test(t)) {
+      const audioUrl = await tts("Admin mode armed. Say your updates. Say “long-term: ...” for permanent notes. Say “done” when finished.");
+      return json({ audio: audioUrl, control: { adminArmed: true } });
     }
 
-    // STT
-    let transcript;
-    try { transcript = await transcribe(audio.data, audio.mime); }
-    catch (sttErr) {
-      const say = "I couldn’t hear that. Try again, or move closer to the mic.";
-      const tts = await ttsSay(say);
-      return reply(200, { response:say, audio:tts, error:String(sttErr) });
-    }
-    const spoken = (transcript || "").trim();
-    if (!spoken) {
-      const say = "I didn’t catch that. Try again.";
-      const tts = await ttsSay(say);
-      return reply(200, { response: say, audio: tts });
-    }
-    const lc = spoken.toLowerCase();
+    // 2) admin session (client sends mode=admin-armed after arming)
+    if (mode === "admin-armed") {
+      // finish
+      if (/\b(done|finish|finished|that's all|that is all)\b/.test(t)) {
+        const audioUrl = await tts("Saved. Admin mode off.");
+        return json({ audio: audioUrl, control: { adminDisarm: true } });
+      }
 
-    // Admin arm/disarm
-    if (/^\s*(admin|admin mode)\s*$/.test(lc)) {
-      armAdmin(businessId);
-      const say = "Admin mode activated. Say your updates, or say “long-term: …” for permanent info. Say “done” when finished.";
-      const tts = await ttsSay(say);
-      return reply(200, { response:say, audio:tts, control:{ adminArmed:true } });
-    }
-    if (/^(done|finish|finished|we're done|we are done)\.?$/i.test(spoken)) {
-      disarmAdmin(businessId);
-      const say = "Got it. Admin mode off.";
-      const tts = await ttsSay(say);
-      return reply(200, { response:say, audio:tts, control:{ adminDisarm:true } });
-    }
-
-    // Admin update capture
-    if (isAdminArmed(businessId) || mode === "admin-armed") {
-      const team = getTeam(businessId);
-
-      // long-term
-      if (/^\s*(long\s*term|permanent|static)\s*[:\-]?\s*/i.test(spoken)) {
-        const content = spoken.replace(/^\s*(long\s*term|permanent|static)\s*[:\-]?\s*/i, "").trim();
-        if (content) {
-          team.longterm.push({ ts: now(), text: content });
-          const say = "Saved to long-term memory.";
-          const tts = await ttsSay(say);
-          return reply(200, { response:say, audio:tts });
+      // delete last item containing keywords
+      if (/^delete\b/.test(t)) {
+        const tail = raw.replace(/^delete\b[:\-]?\s*/i, "").trim();
+        const where = [...state.updates].reverse().findIndex(u => u.text.toLowerCase().includes(tail.toLowerCase()));
+        if (where >= 0) {
+          state.updates.splice(state.updates.length - 1 - where, 1);
+          const audioUrl = await tts("Deleted that update.");
+          return json({ audio: audioUrl });
         }
-      }
-      // delete
-      if (/^\s*(delete|forget)\s+/i.test(spoken)) {
-        const q = spoken.replace(/^\s*(delete|forget)\s+/i, "").trim();
-        const beforeLT = team.longterm.length, beforeU = team.updates.length;
-        team.longterm = team.longterm.filter(x => !includesFuzzy(x.text, q));
-        team.updates  = team.updates.filter(x => !includesFuzzy(x.text, q));
-        const say = (team.longterm.length !== beforeLT || team.updates.length !== beforeU) ? "Deleted." : "I couldn’t find that to delete.";
-        const tts = await ttsSay(say);
-        return reply(200, { response:say, audio:tts });
+        const audioUrl = await tts("I didn’t find a matching update to delete.");
+        return json({ audio: audioUrl });
       }
 
-      // default: daily update
-      team.updates.push({ ts: now(), text: spoken });
-      const say = "Added to today’s updates.";
-      const tts = await ttsSay(say);
-      return reply(200, { response:say, audio:tts });
+      // long-term memory
+      const lt = raw.match(/^(long\s*[- ]?\s*term|remember|permanent)[:\-]?\s*(.+)$/i);
+      if (lt && lt[2]) {
+        state.longterm.push({ text: lt[2].trim(), ts: now() });
+        const audioUrl = await tts("Saved to long-term.");
+        return json({ audio: audioUrl });
+      }
+
+      // default: treat as today update
+      state.updates.push({ text: raw, ts: now() });
+      prune(state);
+      const audioUrl = await tts("Added to today’s updates.");
+      return json({ audio: audioUrl });
     }
 
-    // Employee Q&A
-    const say = await answerEmployee(businessId, spoken);
-    const tts = await ttsSay(say);
-    return reply(200, { response:say, audio:tts });
+    // 3) employee / normal mode
+    if (/\b(what('?| i)s new|any updates|updates today)\b/.test(t)) {
+      const cutoff = now() - BRIEF_WINDOW_HOURS * 3600 * 1000;
+      const recent = state.updates.filter(u => (u.ts || 0) >= cutoff).map(u => u.text);
+      const text = recent.length ? "Here’s the latest. " + bullets(recent.slice(-8))
+                                 : "No new updates right now.";
+      const audioUrl = await tts(text);
+      return json({ audio: audioUrl });
+    }
+
+    // Q&A from long-term + docs
+    const answer = await answerFromMemory(state, raw);
+    const audioUrl = await tts(answer);
+    return json({ audio: audioUrl });
+
   } catch (e) {
     console.error(e);
-    let say = "I hit an error. Please try again.";
-    try { say += " If you’re the admin, you can say “admin” to add updates."; } catch {}
-    const tts = await ttsSay(say).catch(() => null);
-    return reply(200, { error: String(e && e.message || e), response: say, audio: tts || undefined });
+    return json({ error: "server_error" }, 500);
   }
 };
 
 // ---------- helpers ----------
+
+function bullets(arr) { return arr.map(s => "• " + s).join("  "); }
+
+function prune(state) {
+  const ttl = UPDATES_TTL_HOURS * 3600 * 1000;
+  const cut = now() - ttl;
+  state.updates = state.updates.filter(u => (u.ts || 0) >= cut);
+  // keep reasonable caps
+  state.updates = state.updates.slice(-500);
+  state.longterm = state.longterm.slice(-1000);
+  state.docs = state.docs.slice(-200);
+}
+
 async function transcribe(b64, mime) {
+  const data = Buffer.from(b64, "base64");
+  if (data.length < 600) return "";
+
+  const cleanMime = sanitizeMime(mime);
+  const filename = "audio" + extFor(cleanMime);
+
   const fd = new FormData();
   fd.set("model", STT_MODEL);
-  fd.set("temperature", "0");
-  fd.set("language", "en");
-  const blob = Buffer.from(b64, "base64");
-  fd.set("file", new Blob([blob], { type: mime || "application/octet-stream" }), "audio");
+  // keep language auto; set prompt to bias toward ops/update talk
+  fd.set("prompt", "Short workplace update or question for a team assistant.");
+  fd.set("temperature", "0.2");
+  fd.set("file", new Blob([data], { type: cleanMime }), filename);
+
   const r = await fetch(`${OPENAI_ROOT}/audio/transcriptions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
     body: fd,
   });
-  if (!r.ok) throw new Error(`STT ${r.status}: ${await r.text()}`);
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`STT ${r.status}: ${t}`);
+  }
   const j = await r.json();
   return (j.text || "").trim();
 }
 
-async function ttsSay(text) {
-  const clean = String(text || "").slice(0, 4000);
+async function tts(text) {
   const r = await fetch(`${OPENAI_ROOT}/audio/speech`, {
     method: "POST",
     headers: {
@@ -157,47 +199,45 @@ async function ttsSay(text) {
     },
     body: JSON.stringify({
       model: TTS_MODEL,
-      voice: OPENAI_TTS_VOICE,
-      input: clean,
+      voice: OPENAI_TTS_VOICE, // "shimmer" (lighter/brighter)
+      input: sculpt(text),
       response_format: "mp3",
       speed: 1.0,
     }),
   });
   if (!r.ok) throw new Error(`TTS ${r.status}: ${await r.text()}`);
-  const b = Buffer.from(await r.arrayBuffer()).toString("base64");
-  return `data:audio/mpeg;base64,${b}`;
+  const b64 = Buffer.from(await r.arrayBuffer()).toString("base64");
+  return `data:audio/mpeg;base64,${b64}`;
 }
 
-function includesFuzzy(hay, needle){ hay=(hay||"").toLowerCase(); needle=(needle||"").toLowerCase(); if(!needle) return false; return hay.includes(needle); }
-function pickRecent(updates,hours){ const cutoff = Date.now() - hours*3600*1000; return (updates||[]).filter(u => (u.ts||0) >= cutoff); }
+function sculpt(t) {
+  let s = String(t || "").trim();
+  s = s.replace(/([.!?])\s+/g, "$1  ");
+  if (!/[.!?…]$/.test(s)) s += ".";
+  return s.slice(0, 4000);
+}
 
-async function answerEmployee(businessId, question) {
-  const docsMap = getDocsMap();
-  const team = getTeam(businessId);
-  const recent = pickRecent(team.updates, BRIEF_WINDOW_HOURS);
-  const longterm = team.longterm || [];
-  const docs = docsMap.get(businessId) || [];
-
-  const sources = [];
-  if (recent.length) sources.push("Recent updates:\n" + recent.map(u => "- " + u.text).join("\n"));
-  if (longterm.length) sources.push("Long-term info:\n" + longterm.map(u => "- " + u.text).join("\n"));
-  if (docs.length) {
-    const docSnips = docs.slice(-12).map(d => `- ${d.name}: ${d.text.slice(0, 1200)}`);
-    sources.push("Documents (latest):\n" + docSnips.join("\n"));
-  }
-  if (!sources.length) return "No updates or files yet.";
-
-  const system = [
-    "You are Nora, a strictly retrieval-based team assistant.",
-    "Answer ONLY using the provided updates, permanent notes, and document snippets.",
-    "If it’s not there, say you don’t have that information.",
-    "Be concise, warm, and plain. 2–4 sentences.",
-  ].join(" ");
-
-  const messages = [
-    { role: "system", content: system },
-    { role: "user", content: `Question: ${question}\n\nKnowledge:\n${sources.join("\n\n")}` },
+async function answerFromMemory(state, question) {
+  // Cheap retrieval by token overlap
+  const pool = [
+    ...state.longterm.map(x => ({ type: "lt", text: x.text })),
+    ...state.docs.map(d => ({ type: "doc", text: d.text, name: d.name })),
   ];
+  if (pool.length === 0) {
+    return "I don’t have that information yet. Ask your admin to add it.";
+  }
+
+  const qset = new Set(tokens(question));
+  const scored = pool.map(it => {
+    const w = new Set(tokens(it.text));
+    let overlap = 0;
+    for (const t of qset) if (w.has(t)) overlap++;
+    return { it, score: overlap / Math.max(1, Math.min(qset.size, w.size)) };
+  }).sort((a, b) => b.score - a.score);
+
+  const top = scored.slice(0, 6).map(x => x.it.text);
+  const system = `You are Nora, a voice-first team assistant. Answer ONLY using the provided context. If the answer is not covered, say you don't have that information yet. Keep answers brief.`;
+  const user = `Question: ${question}\n\nContext:\n- ${top.join("\n- ")}`;
 
   const r = await fetch(`${OPENAI_ROOT}/chat/completions`, {
     method: "POST",
@@ -205,9 +245,25 @@ async function answerEmployee(businessId, question) {
       Authorization: `Bearer ${OPENAI_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ model: CHAT_MODEL, messages, temperature: 0 }),
+    body: JSON.stringify({
+      model: CHAT_MODEL,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      temperature: 0.2,
+      max_tokens: 220,
+    }),
   });
   if (!r.ok) throw new Error(`Chat ${r.status}: ${await r.text()}`);
   const j = await r.json();
-  return (j.choices?.[0]?.message?.content || "I don’t have that info.").trim();
+  return (j.choices?.[0]?.message?.content || "I don’t have that information yet.").trim();
+}
+
+function tokens(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
 }
