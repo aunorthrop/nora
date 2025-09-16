@@ -5,23 +5,14 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Nora — voice-first team updates</title>
 <style>
-  :root{
-    --bg:#0e0f13; --tile:#151821; --text:#e5e7ee; --muted:#9aa3b2;
-    --lav:#a78bfa; --lav-ghost:#a78bfa26; --speak:#22c55e; --think:#facc15; --err:#ef4444;
-  }
+  :root{ --bg:#0e0f13; --tile:#151821; --text:#e5e7ee; --muted:#9aa3b2;
+         --lav:#a78bfa; --lav-ghost:#a78bfa26; --speak:#22c55e; --think:#facc15; --err:#ef4444; }
   html,body{height:100%}
-  body{
-    margin:0;background:var(--bg);color:var(--text);
-    display:flex;align-items:center;justify-content:center;
-    font-family:ui-sans-serif,system-ui,-apple-system,"Inter",Segoe UI,Roboto,Arial;
-    -webkit-user-select:none;user-select:none;touch-action:manipulation
-  }
-  .mic{
-    width:180px;height:180px;border-radius:24px;border:none;background:#1f2330;
-    box-shadow:0 10px 40px #0006, inset 0 -2px 0 #000a;
-    display:flex;align-items:center;justify-content:center;
-    cursor:pointer; transition:transform .06s ease, background .15s ease, box-shadow .15s ease
-  }
+  body{margin:0;background:var(--bg);color:var(--text);display:flex;align-items:center;justify-content:center;
+       font-family:ui-sans-serif,system-ui,-apple-system,"Inter",Segoe UI,Roboto,Arial; -webkit-user-select:none;user-select:none;touch-action:manipulation}
+  .mic{width:180px;height:180px;border-radius:24px;border:none;background:#1f2330;
+       box-shadow:0 10px 40px #0006, inset 0 -2px 0 #000a;display:flex;align-items:center;justify-content:center;
+       cursor:pointer;transition:transform .06s ease, background .15s ease, box-shadow .15s ease}
   .mic svg{width:42px;height:42px;fill:#e8ebf5;opacity:.95;pointer-events:none}
   .mic:active{transform:scale(.985)}
   .idle{background:#1f2330}
@@ -66,25 +57,33 @@
 
 <script>
 (()=> {
+  // DOM
   const mic = document.getElementById('mic');
   const gate = document.getElementById('gate');
   const codeIn = document.getElementById('teamCode');
   const enterBtn = document.getElementById('enterBtn');
 
+  // Endpoints
   const API_VOICE='/.netlify/functions/voice';
 
+  // Storage keys
   const LS_CODE='nora_team_code';
   const LS_ROLE='nora_role';
   const LS_INTRO_PREFIX='nora_intro_done_';
 
-  const speaker = new Audio(); speaker.preload='none'; speaker.playsInline=true;
+  // Intro text (guaranteed spoken via fallback on first tap)
+  const INTRO_TEXT = "Hi, I’m Nora. I’m on. If you’re the owner, say admin and tell me the updates—I'll remember them. Team members can ask what’s new or anything we’ve saved. Tap again to turn me off.";
 
+  // Audio
+  const speaker=new Audio(); speaker.preload='none'; speaker.playsInline=true;
+
+  // State
   let audioCtx, isOn=false, isSpeaking=false, inflight=null;
   let rec=null, media=null, chunks=[];
   let loopRunning=false, micPrimed=false, primed=false;
 
-  // --- Helpers
-  function toast(m){ const t=document.createElement('div'); t.className='toast'; t.textContent=m; document.body.appendChild(t); setTimeout(()=>{t.remove();},2600); }
+  // Helpers
+  function toast(m){ const t=document.createElement('div'); t.className='toast'; t.textContent=m; document.body.appendChild(t); setTimeout(()=>{try{t.remove();}catch{}},2600); }
   function setState(s){ mic.className='mic '+s; }
   function showGate(){ gate.classList.add('visible'); }
   function hideGate(){ gate.classList.remove('visible'); }
@@ -100,14 +99,15 @@
     hideGate();
   };
 
-  // --- Audio boot
+  // Audio boot
   async function ensureAudio(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state!=='running') await audioCtx.resume(); }
   async function primeOnce(){
     if(primed) return;
     await ensureAudio();
-    // one-sample “unlock” for iOS autoplay
+    // unlock autoplay for iOS (WebAudio + HTMLAudio)
     const b=audioCtx.createBuffer(1,1,audioCtx.sampleRate);
     const s=audioCtx.createBufferSource(); s.buffer=b; s.connect(audioCtx.destination); s.start(0);
+    try{ speaker.src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="; await speaker.play(); speaker.pause(); speaker.currentTime=0; }catch{}
     primed=true;
   }
   async function askMicPermissionOnce(){
@@ -117,7 +117,7 @@
     micPrimed=true;
   }
 
-  // --- Play audio (and guaranteed fallback with speechSynthesis)
+  // Guaranteed speech fallback
   async function speakFallback(text){
     try{
       if(!('speechSynthesis' in window)) return false;
@@ -126,18 +126,20 @@
       return await new Promise(res=>{ u.onend=()=>res(true); u.onerror=()=>res(false); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); });
     }catch{ return false; }
   }
-  async function playAudio(dataUrl, fallbackText=null){
+
+  // Play server audio or fallback text
+  async function playAudioOrText(dataUrl, fallbackText){
     isSpeaking=true; setState('speaking');
     try{
       if(dataUrl){
         speaker.pause(); speaker.currentTime=0; speaker.src=dataUrl;
         await speaker.play();
         await new Promise(res=>{ speaker.onended=res; speaker.onpause=res; });
-      }else if(fallbackText){
-        await speakFallback(fallbackText);
+      }else{
+        await speakFallback(fallbackText || "Okay.");
       }
-    }catch(e){
-      if(fallbackText) await speakFallback(fallbackText);
+    }catch{
+      await speakFallback(fallbackText || "Okay.");
     }
     isSpeaking=false; setState(isOn?'listening':'idle');
   }
@@ -145,7 +147,7 @@
   function abortInFlight(){ try{ inflight?.abort(); }catch{} inflight=null; }
   function stopRecorder(){ try{rec?.stop();}catch{} try{media?.getTracks().forEach(t=>t.stop());}catch{} rec=null; media=null; }
 
-  // --- Recorder
+  // Recorder
   function pickMime(){ const M=window.MediaRecorder; if(!M||!M.isTypeSupported) return ""; const pref=["audio/mp4;codecs=mp4a.40.2","audio/m4a","audio/webm;codecs=opus","audio/webm","audio/mpeg","audio/wav"]; for(const m of pref) if(M.isTypeSupported(m)) return m; return ""; }
   async function startRecorder(){
     const mime=pickMime();
@@ -171,7 +173,18 @@
   }
   async function blobToB64(b){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onloadend=()=>res(String(fr.result).split(',')[1]); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(b); }); }
 
-  // --- Continuous loop (single-run guard)
+  // Fetch with timeout
+  async function fetchJSONWithTimeout(url, options={}, ms=12000){
+    const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(), ms);
+    try{
+      const r=await fetch(url,{...options, signal:ctrl.signal});
+      const j=await r.json().catch(()=>({}));
+      return {ok:r.ok, status:r.status, json:j};
+    }finally{ clearTimeout(t); }
+  }
+
+  // Listen loop (single-run guard)
+  let loopRunning=false;
   async function listenLoop(){
     if(loopRunning) return; loopRunning=true;
     while(isOn){
@@ -188,64 +201,53 @@
         const code=localStorage.getItem(LS_CODE)||'';
         const role=localStorage.getItem(LS_ROLE)||'employee';
 
-        abortInFlight(); inflight=new AbortController();
         setState('thinking');
-
-        const resp=await fetch(API_VOICE,{
+        const {ok,status,json} = await fetchJSONWithTimeout(API_VOICE,{
           method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({businessId:code,audio:{data:b64,mime:heard.type},role}),
-          signal:inflight.signal
+          body:JSON.stringify({businessId:code,audio:{data:b64,mime:heard.type},role})
         });
-        const data = await resp.json();
 
-        if(data.control?.requireCode){ isOn=false; setState('idle'); showGate(); break; }
-        if(data.control?.role){ localStorage.setItem(LS_ROLE, data.control.role); }
+        if(json.control?.requireCode){ isOn=false; setState('idle'); showGate(); toast('Enter your team code'); break; }
+        if(json.control?.role){ localStorage.setItem(LS_ROLE, json.control.role); }
 
-        // Prefer server audio, fallback to simple TTS if missing
-        const say = data.response || data.text || "";
-        if(data.audio) await playAudio(data.audio);
-        else await playAudio(null, say || "Okay.");
+        if(ok){
+          await playAudioOrText(json.audio || null, json.response || json.text || "Okay.");
+        }else{
+          toast(`Server ${status||'error'}`); // still talk so it's never silent
+          await playAudioOrText(null, "I ran into an error, but I heard you.");
+        }
 
       }catch(e){
-        if(e && e.name==='AbortError'){ /* ignore */ }
-        else { setState('error'); toast(String(e.message||'error')); await new Promise(r=>setTimeout(r,250)); setState(isOn?'listening':'idle'); }
+        setState('error'); toast(String(e.message||'error')); await new Promise(r=>setTimeout(r,250)); setState(isOn?'listening':'idle');
       }
     }
     loopRunning=false;
   }
 
-  // --- Tap to toggle
+  // Toggle
   mic.addEventListener('click', async ()=>{
-    // Force code gate first
-    if(!localStorage.getItem(LS_CODE)){ showGate(); return; }
-
     if(isSpeaking){ try{speaker.pause();}catch{} return; } // interrupt
+
+    if(!localStorage.getItem(LS_CODE)){ showGate(); return; }
 
     if(!isOn){
       isOn=true; mic.setAttribute('aria-pressed','true');
-      try{
-        await primeOnce();                 // unlock audio on iOS
-        await askMicPermissionOnce();      // **prompt mic permission right now**
-      }catch(e){
-        isOn=false; mic.setAttribute('aria-pressed','false'); setState('error'); toast('Microphone permission is required'); return;
-      }
 
-      // INTRO once per team — if server TTS fails, browser TTS guarantees sound
-      setState('speaking');
+      try{ await primeOnce(); await askMicPermissionOnce(); }
+      catch(e){ isOn=false; mic.setAttribute('aria-pressed','false'); setState('error'); toast('Microphone permission is required'); return; }
+
+      // INTRO once (guaranteed via fallback)
       const code=localStorage.getItem(LS_CODE);
       const introKey=LS_INTRO_PREFIX+code;
       if(!localStorage.getItem(introKey)){
-        try{
-          const r=await fetch(API_VOICE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,intro:true})});
-          const j=await r.json();
-          const fallbackText = "Hi, I’m Nora. I’m on. If you’re the owner, say “admin” and tell me the updates—I'll remember them. Team members can ask “what’s new?” or anything we’ve saved. Tap again to turn me off.";
-          if(j.audio) await playAudio(j.audio, fallbackText);
-          else await playAudio(null, fallbackText);
-          localStorage.setItem(introKey,'1');
-        }catch{
-          await playAudio(null, "Hi, I’m Nora. I’m on. If you’re the owner, say “admin” and tell me the updates—I'll remember them. Team members can ask “what’s new?” or anything we’ve saved. Tap again to turn me off.");
-        }
+        setState('speaking');
+        // speak immediately so the user hears something right now
+        await speakFallback(INTRO_TEXT);
+        localStorage.setItem(introKey,'1');
+        // (optional) warm the function but ignore result
+        fetch(API_VOICE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,intro:true})}).catch(()=>{});
       }
+
       setState('listening');
       listenLoop();
     } else {
