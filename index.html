@@ -1,114 +1,19 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Nora — Voice-first team updates</title>
-<style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  html,body{height:100%}
-  body{
-    background:#0f1115;color:#e9eef6;display:flex;align-items:center;justify-content:center;
-    font-family:-apple-system,BlinkMacSystemFont,Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;
-    -webkit-user-select:none;user-select:none;touch-action:manipulation;
-  }
-  .voice-button{
-    width:160px;height:160px;border:none;border-radius:32px;background:#151821;color:#d8e0f0;
-    box-shadow:0 8px 28px rgba(0,0,0,.35), inset 0 -3px 0 rgba(255,255,255,.06);
-    cursor:pointer;position:relative;transition:transform .06s ease, box-shadow .06s ease, background .15s ease, color .15s ease;
-    -webkit-tap-highlight-color:transparent;
-  }
-  .voice-button:active,.voice-button.pressed{transform:scale(.98);box-shadow:inset 0 6px 16px rgba(0,0,0,.35),0 2px 6px rgba(0,0,0,.25)}
-  .voice-button.idle{background:#151821;color:#d8e0f0}
-  .voice-button.listening{background:#1b5fff;color:#fff;box-shadow:0 0 0 4px rgba(27,95,255,.25), 0 8px 28px rgba(0,0,0,.4)}
-  .voice-button.thinking{background:#ffd43b;color:#1b1b1b}
-  .voice-button.speaking{background:#13c26b;color:#fff}
-  .voice-button.error{background:#ff4d4f;color:#fff}
-  .mic-icon{width:36px;height:36px;fill:currentColor}
-
-  .buy-btn{
-    position:fixed;top:14px;left:14px;z-index:3000;padding:10px 14px;border-radius:12px;border:none;
-    background:#222;color:#fff;font:500 14px/1 system-ui,-apple-system,Inter,Segoe UI,Roboto,Arial,sans-serif;
-    text-decoration:none;box-shadow:0 6px 18px rgba(0,0,0,.25);pointer-events:auto
-  }
-  .buy-btn:active{transform:scale(.98)}
-
-  .plus{position:fixed;top:14px;right:14px;z-index:3000}
-  .plus-btn{
-    width:44px;height:44px;border:none;border-radius:12px;background:#1b5fff;color:#fff;cursor:pointer;
-    box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:24px;line-height:44px;text-align:center
-  }
-  .plus-btn:active{transform:scale(.98)}
-
-  .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:20px;z-index:4000}
-  .modal.open{display:flex}
-  .card{background:#141821;border:1px solid rgba(255,255,255,.07);border-radius:16px;max-width:520px;width:100%;padding:18px;box-shadow:0 18px 55px rgba(0,0,0,.45)}
-  .row{display:flex;gap:10px;margin-top:8px;align-items:center}
-  .file-choose{display:inline-block}
-  .file-choose input{display:none}
-  .file-choose label{
-    display:inline-block;background:#242936;color:#e9eef6;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer
-  }
-  .btn{background:#242936;color:#e9eef6;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer}
-  .btn:active{transform:scale(.98)}
-  input[type=text]{flex:1;background:#0e1219;border:1px solid rgba(255,255,255,.08);border-radius:10px;color:#e9eef6;padding:10px 12px;font-size:14px}
-  .list{margin-top:12px;max-height:240px;overflow:auto;border-top:1px solid rgba(255,255,255,.06);padding-top:10px}
-  .item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)}
-  .meta{opacity:.85;font-size:13px}
-  .bar{height:8px;background:#242936;border-radius:8px;overflow:hidden;margin-top:8px}
-  .fill{height:100%;width:0;background:#1b5fff;transition:width .2s}
-  .chk{margin-left:8px;color:#13c26b;font-size:14px}
-</style>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.2.67/pdf.min.js" integrity="sha512-7ofX1w1+4XNlJ0iSvk3oYl2j4mECwR0x3q0rO8dG8Zb3kQJQz8sSXVQ7g7p3o8J0e0cS2sO1+G0UuL0adgq6xQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-</head>
-<body>
-
-<a class="buy-btn" href="https://buy.stripe.com/14A14ng1E3Gn4BmceI5sA0b" target="_blank" rel="noopener">Subscribe – $10/mo</a>
-
-<div class="plus"><button class="plus-btn" id="openUpload" aria-label="Upload files">＋</button></div>
-
-<button id="voiceBtn" class="voice-button idle" aria-label="Press to talk">
-  <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c1.66 0 3 1.34 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/>
-  </svg>
-</button>
-
-<!-- Upload modal -->
-<div class="modal" id="uploadModal" aria-hidden="true">
-  <div class="card">
-    <div class="row" style="justify-content:space-between">
-      <div class="meta" style="opacity:.9">Files</div>
-      <button class="btn" id="closeUpload">Close</button>
-    </div>
-    <div class="row" style="margin-top:12px">
-      <div class="file-choose">
-        <input id="fileInput" type="file" multiple accept=".pdf,.txt,.md,.markdown"/>
-        <label for="fileInput">Choose files</label>
-      </div>
-    </div>
-    <div id="uploadArea"></div>
-    <div class="list" id="fileList"></div>
-  </div>
-</div>
-
-<!-- Team code modal (open by mic long-press or when tapping mic with no code) -->
-<div class="modal" id="codeModal" aria-hidden="true">
-  <div class="card">
-    <div class="row" style="justify-content:space-between">
-      <div class="meta" style="opacity:.9">Enter team code</div>
-      <button class="btn" id="closeCode">Close</button>
-    </div>
-    <div class="row" style="margin-top:12px">
-      <input id="teamCode" type="text" placeholder="e.g. NORA-ABCD-1234 or TEAM-NORA"/>
-      <button class="btn" id="saveCode">Save</button>
-    </div>
-  </div>
-</div>
-
+<!-- only the <script> block changed; keep your existing HTML/CSS above -->
 <script>
 (() => {
   const DEMO_CODE = 'TEAM-NORA';
+  const STORAGE_KEY = 'nora_business_code';
+  const ADMIN_ARM_KEY = 'nora_admin_armed';
+
+  function getBiz(){ return localStorage.getItem(STORAGE_KEY) || ""; }
+  function setBiz(v){ localStorage.setItem(STORAGE_KEY, String(v||"").trim()); }
+  function isAdminArmed(){ return localStorage.getItem(ADMIN_ARM_KEY) === '1'; }
+  function armAdmin(){ localStorage.setItem(ADMIN_ARM_KEY, '1'); }
+  function disarmAdmin(){ localStorage.removeItem(ADMIN_ARM_KEY); }
+
+  // (If you still want the demo code auto-set, leave this line ON.
+  //  If you want to force real codes only, comment it out.)
+  if (!getBiz()) { setBiz(DEMO_CODE); }
 
   const voiceBtn = document.getElementById('voiceBtn');
   const openUpload = document.getElementById('openUpload');
@@ -123,21 +28,13 @@
   const saveCodeBtn = document.getElementById('saveCode');
   const closeCodeBtn = document.getElementById('closeCode');
 
-  const STORAGE_KEY = 'nora_business_code';
-  function getBiz(){ return localStorage.getItem(STORAGE_KEY) || ""; }
-  function setBiz(v){ localStorage.setItem(STORAGE_KEY, String(v||"").trim()); }
-
-  // Auto-set demo code on first load if there isn't one
-  if (!getBiz()) { setBiz(DEMO_CODE); }
-
   function showModal(m){ m.classList.add('open'); m.setAttribute('aria-hidden','false'); }
   function hideModal(m){ m.classList.remove('open'); m.setAttribute('aria-hidden','true'); }
 
-  // Team code actions
   saveCodeBtn.addEventListener('click', () => { const v = teamCodeInput.value.trim(); if (!v) return; setBiz(v); hideModal(codeModal); });
   closeCodeBtn.addEventListener('click', () => hideModal(codeModal));
 
-  // Long-press mic to open team code modal anytime
+  // Long-press mic => open code modal
   let pressTimer;
   function startPress(){ clearTimeout(pressTimer); pressTimer = setTimeout(()=>{ teamCodeInput.value = getBiz(); showModal(codeModal); }, 1200); }
   function cancelPress(){ clearTimeout(pressTimer); }
@@ -208,10 +105,26 @@
       const b64 = await blobToBase64(blob);
       inflight?.abort(); inflight = new AbortController();
 
-      const payload = { businessId:getBiz(), sessionId, audio:{ data:b64, mime:blob.type } };
-      const resp = await fetch('/.netlify/functions/voice',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload), signal:inflight.signal });
+      const payload = {
+        businessId: getBiz(),
+        sessionId,
+        mode: isAdminArmed() ? 'admin-armed' : 'normal',
+        audio: { data: b64, mime: blob.type }
+      };
+
+      const resp = await fetch('/.netlify/functions/voice',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(payload),
+        signal: inflight.signal
+      });
       const data = await resp.json();
       sessionId = data.sessionId || sessionId;
+
+      // React to control signals
+      if (data.control?.adminArmed) armAdmin();
+      if (data.control?.adminDisarm) disarmAdmin();
+      if (data.control?.requireCode) { teamCodeInput.value = ""; showModal(codeModal); }
 
       if (data.audio){
         await play(data.audio);
@@ -265,11 +178,11 @@
     }
   });
 
-  // ==== File uploads ====
-  fileInput.addEventListener('change', async () => {
-    const files = Array.from(fileInput.files || []);
+  // Uploads (unchanged)
+  const fileInputEl = document.getElementById('fileInput');
+  fileInputEl.addEventListener('change', async () => {
+    const files = Array.from(fileInputEl.files || []);
     if (!files.length) return;
-
     for (const file of files){
       if (file.size > 10 * 1024 * 1024) { showProgress(file.name, "Too large (max 10MB)", 0, true); continue; }
       const slot = showProgress(file.name, "Reading…", 0);
@@ -284,7 +197,7 @@
       }
     }
     await renderFileList();
-    fileInput.value = "";
+    fileInputEl.value = "";
   });
 
   async function extractText(file, onProg){
@@ -356,5 +269,3 @@
   function escapeHtml(s){ return String(s||"").replace(/[&<>"']/g, m=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[m])); }
 })();
 </script>
-</body>
-</html>
