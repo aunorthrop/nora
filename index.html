@@ -3,347 +3,248 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Nora — Voice-first team updates</title>
+<title>Nora — voice-first team updates</title>
 <style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  html,body{height:100%}
-  body{background:#0f1115;color:#e9eef6;display:flex;align-items:center;justify-content:center;
-       font-family:-apple-system,BlinkMacSystemFont,Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;
-       -webkit-user-select:none;user-select:none;touch-action:manipulation}
-  .voice-button{width:160px;height:160px;border:none;border-radius:32px;background:#151821;color:#d8e0f0;
-    box-shadow:0 8px 28px rgba(0,0,0,.35), inset 0 -3px 0 rgba(255,255,255,.06);cursor:pointer;position:relative;
-    transition:transform .06s ease, box-shadow .06s ease, background .15s ease, color .15s ease;-webkit-tap-highlight-color:transparent}
-  .voice-button:active,.voice-button.pressed{transform:scale(.98);box-shadow:inset 0 6px 16px rgba(0,0,0,.35),0 2px 6px rgba(0,0,0,.25)}
-  .voice-button.idle{background:#151821;color:#d8e0f0}
-  .voice-button.listening{background:#1b5fff;color:#fff;box-shadow:0 0 0 4px rgba(27,95,255,.25),0 8px 28px rgba(0,0,0,.4)}
-  .voice-button.thinking{background:#ffd43b;color:#1b1b1b}
-  .voice-button.speaking{background:#13c26b;color:#fff}
-  .voice-button.error{background:#ff4d4f;color:#fff}
-  .mic-icon{width:36px;height:36px;fill:currentColor}
-
-  .plus{position:fixed;top:14px;right:14px;z-index:3000}
-  .plus-btn{width:44px;height:44px;border:none;border-radius:12px;background:#1b5fff;color:#fff;cursor:pointer;
-    box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:24px;line-height:44px;text-align:center}
-  .plus-btn:active{transform:scale(.98)}
-
-  .gate{position:fixed;inset:0;background:rgba(10,12,18,.92);display:flex;align-items:center;justify-content:center;padding:20px;z-index:5000}
-  .gate-card{background:#141821;border:1px solid rgba(255,255,255,.07);border-radius:16px;max-width:520px;width:100%;padding:20px;box-shadow:0 18px 55px rgba(0,0,0,.45)}
-  .h{font-weight:600;margin-bottom:6px}
-  .row{display:flex;gap:10px;margin-top:10px;align-items:center}
-  input[type=text]{flex:1;background:#0e1219;border:1px solid rgba(255,255,255,.08);border-radius:10px;color:#e9eef6;padding:12px 12px;font-size:14px}
-  .btn{background:#242936;color:#e9eef6;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer}
+  html,body{height:100%;margin:0;background:#0f1115;color:#e6e6e6;font-family:system-ui, -apple-system, Segoe UI, Inter, Roboto, sans-serif}
+  .wrap{height:100%;display:flex;align-items:center;justify-content:center;position:relative}
+  .btn{width:160px;height:160px;border-radius:28px;border:none;background:#ff4d4d;color:#111;
+       box-shadow:0 8px 28px rgba(0,0,0,.35);font-size:18px;cursor:pointer;transition:transform .06s ease}
   .btn:active{transform:scale(.98)}
-  .buy{background:#1b5fff;color:#fff}
-
-  .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:20px;z-index:4000}
-  .modal.open{display:flex}
-  .card{background:#141821;border:1px solid rgba(255,255,255,.07);border-radius:16px;max-width:520px;width:100%;padding:18px;box-shadow:0 18px 55px rgba(0,0,0,.45)}
-  .meta{opacity:.85;font-size:13px}
-  .file-choose{display:inline-block}
-  .file-choose input{display:none}
-  .file-choose label{display:inline-block;background:#E6E9F2;color:#111;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer}
-
-  .list{margin-top:12px;max-height:240px;overflow:auto;border-top:1px solid rgba(255,255,255,.06);padding-top:10px}
-  .item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)}
-  .bar{height:8px;background:#242936;border-radius:8px;overflow:hidden;margin-top:8px}
-  .fill{height:100%;width:0;background:#1b5fff;transition:width .2s}
-  .chk{margin-left:8px;color:#13c26b;font-size:14px}
-
-  .pop{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:20px;z-index:6000}
-  .pop.open{display:flex}
-  .pop-card{background:#141821;border:1px solid rgba(255,255,255,.07);border-radius:16px;max-width:520px;width:100%;padding:20px;box-shadow:0 18px 55px rgba(0,0,0,.45)}
-  .code{margin-top:10px;font-size:28px;font-weight:700;letter-spacing:2px;background:#0e1219;border-radius:12px;padding:14px 16px;text-align:center}
-
-  .toast{position:fixed;bottom:12px;left:12px;background:#ff4d4f;color:#fff;padding:8px 10px;border-radius:10px;font-size:12px;box-shadow:0 6px 18px rgba(0,0,0,.3);display:none;z-index:7000;max-width:80vw;white-space:pre-wrap}
+  .btn.blue{background:#2f7bfd;color:#fff}
+  .btn.yellow{background:#ffc61a;color:#111}
+  .gate{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(15,17,21,.92);
+        display:flex;align-items:center;justify-content:center}
+  .card{background:#181b22;border:1px solid #2a2f3a;border-radius:14px;padding:20px;width:min(92vw,520px)}
+  .h{font-weight:600;margin-bottom:8px}
+  .row{display:flex;gap:8px;margin-top:10px}
+  .inp{flex:1;background:#0f1115;border:1px solid #2a2f3a;border-radius:10px;color:#e6e6e6;height:42px;padding:0 12px}
+  .act{background:#3771ff;color:#fff;border:none;border-radius:10px;padding:0 14px;height:42px;cursor:pointer}
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:#cc3333;color:#fff;
+         padding:10px 14px;border-radius:10px;font-size:13px;display:none}
+  .plus{position:fixed;right:16px;top:16px;width:44px;height:44px;border-radius:10px;background:#2a2f3a;
+        color:#e6e6e6;border:none;font-size:26px;cursor:pointer}
+  .files{position:fixed;right:16px;top:70px;background:#181b22;border:1px solid #2a2f3a;border-radius:12px;
+         padding:10px 12px;display:none;width:320px}
+  .files h4{margin:6px 0 10px 0}
+  .files .u{display:flex;gap:8px;align-items:center}
+  .files .u input[type=file]{display:block;background:#0f1115;color:#e6e6e6;border:1px solid #2a2f3a;border-radius:8px;padding:8px}
+  .list{margin-top:10px;font-size:13px;color:#bfc6d1;max-height:180px;overflow:auto}
+  .ok{background:#16a34a}
 </style>
 </head>
 <body>
+<div class="wrap">
+  <button id="mic" class="btn"> </button>
 
-<div class="plus"><button class="plus-btn" id="openUpload" aria-label="Upload files">＋</button></div>
-
-<button id="voiceBtn" class="voice-button idle" aria-label="Press to talk">
-  <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c1.66 0 3 1.34 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/>
-  </svg>
-</button>
-
-<!-- Upload modal -->
-<div class="modal" id="uploadModal" aria-hidden="true">
-  <div class="card">
-    <div class="row" style="justify-content:space-between"><div class="meta">Files</div><button class="btn" id="closeUpload">Close</button></div>
-    <div class="row" style="margin-top:12px">
-      <div class="file-choose"><input id="fileInput" type="file" multiple accept=".pdf,.txt,.md,.markdown"/><label for="fileInput">Choose files</label></div>
-    </div>
-    <div id="uploadArea"></div>
-    <div class="list" id="fileList"></div>
-  </div>
-</div>
-
-<!-- Gate -->
-<div class="gate" id="gate">
-  <div class="gate-card">
-    <div class="h">Join your team on Nora</div>
-    <div class="meta">Enter the 8-digit team code (####-####) you received after subscribing. Or subscribe now to create a new team.</div>
-    <div class="row"><input id="teamCode" type="text" inputmode="numeric" pattern="[0-9]{4}-[0-9]{4}" placeholder="1234-5678"/><button class="btn" id="saveCode">Enter</button></div>
-    <div class="row"><button class="btn buy" id="buyBtn">Subscribe – $10/mo</button></div>
-  </div>
-</div>
-
-<!-- Popup: code after Stripe redirect -->
-<div class="pop" id="issuePop" aria-hidden="true">
-  <div class="pop-card">
-    <div class="h">Your team code</div>
-    <div class="code" id="issuedCode">0000-0000</div>
-    <div class="row" style="margin-top:12px">
-      <button class="btn" id="copyIssued">Copy</button>
-      <button class="btn buy" id="useIssued">Use this code</button>
+  <!-- Team code gate -->
+  <div id="gate" class="gate" style="display:none">
+    <div class="card">
+      <div class="h">Join your team on Nora</div>
+      <div style="font-size:14px;color:#bfc6d1">Enter the 8-digit team code (####-####). Or subscribe to create a new team.</div>
+      <div class="row">
+        <input id="code" class="inp" placeholder="1234-5678" maxlength="9" />
+        <button id="enter" class="act">Enter</button>
+      </div>
+      <div class="row">
+        <button id="buy" class="act" style="background:#00b894">Subscribe — $10/mo</button>
+      </div>
     </div>
   </div>
-</div>
 
-<div id="toast" class="toast"></div>
+  <!-- uploads (optional) -->
+  <button id="plus" class="plus">+</button>
+  <div id="files" class="files">
+    <h4>Files</h4>
+    <div class="u"><input id="file" type="file" accept="application/pdf" /></div>
+    <div id="flist" class="list">No files uploaded yet.</div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+</div>
 
 <script>
 (function(){
-  var toast=document.getElementById('toast');
-  function showErr(msg){ try{ toast.textContent=String(msg||'Error'); toast.style.display='block'; }catch(e){} console.error(msg); }
-  window.onerror=function(msg,src,line,col,err){ showErr(msg+(err&&err.stack?('\\n'+err.stack):'')); };
-  window.onunhandledrejection=function(ev){ try{ showErr(''+(ev.reason&&ev.reason.stack?ev.reason.stack:ev.reason)); }catch(e){} };
+  const mic  = document.getElementById('mic');
+  const gate = document.getElementById('gate');
+  const code = document.getElementById('code');
+  const enter= document.getElementById('enter');
+  const buy  = document.getElementById('buy');
+  const toast= document.getElementById('toast');
+  const plus = document.getElementById('plus');
+  const files= document.getElementById('files');
+  const fileI= document.getElementById('file');
+  const flist= document.getElementById('flist');
 
-  try{
-    var STORAGE_KEY='nora_business_code', ADMIN_ARM_KEY='nora_admin_armed';
-    function getBiz(){ try{ return localStorage.getItem(STORAGE_KEY)||""; }catch(e){ return ""; } }
-    function setBiz(v){ try{ localStorage.setItem(STORAGE_KEY,String(v||"").trim()); }catch(e){} }
-    function hasCode(){ return /^[0-9]{4}-[0-9]{4}$/.test(getBiz()); }
-    function isAdminArmed(){ try{ return localStorage.getItem(ADMIN_ARM_KEY)==='1'; }catch(e){ return false; } }
-    function armAdmin(){ try{ localStorage.setItem(ADMIN_ARM_KEY,'1'); }catch(e){} }
-    function disarmAdmin(){ try{ localStorage.removeItem(ADMIN_ARM_KEY); }catch(e){} }
+  const API = p => fetch(p, { headers:{}, method:'GET' });
+  const post = (u,b) => fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
 
-    // first-run flag per team (only set AFTER we actually play onboarding once)
-    function firstRunKey(){ return 'nora_onboarded_' + (getBiz()||''); }
-    function isFirstRun(){ try{ return !localStorage.getItem(firstRunKey()); }catch(e){ return true; } }
-    function markOnboarded(){ try{ localStorage.setItem(firstRunKey(),'1'); }catch(e){} }
+  const LS = {
+    team:   () => localStorage.getItem('nora_team') || '',
+    setTeam:(v)=> localStorage.setItem('nora_team', v),
+    role:   () => localStorage.getItem('nora_role') || '',
+    setRole:(v)=> localStorage.setItem('nora_role', v),
+    first:  () => localStorage.getItem('nora_first_run') !== 'done',
+    setFirstDone:()=> localStorage.setItem('nora_first_run','done'),
+  };
 
-    var gate=document.getElementById('gate'); function updateGate(){ gate.style.display=hasCode()?'none':'flex'; } updateGate();
+  // --- gate ---
+  function showGate(){ gate.style.display='flex'; }
+  function hideGate(){ gate.style.display='none'; }
+  function fmt(v){ return (v||'').replace(/[^\d]/g,'').replace(/(\d{4})(\d{0,4}).*/,'$1-$2').toUpperCase(); }
 
-    // handle ?code=####-#### popup after success redirect
-    (function(){
-      var m=location.search.match(/[?&]code=([0-9]{4}-[0-9]{4})/);
-      if(!m) return;
-      var code=m[1]; var pop=document.getElementById('issuePop'); var issuedEl=document.getElementById('issuedCode');
-      issuedEl.textContent=code; pop.classList.add('open'); pop.setAttribute('aria-hidden','false');
-      document.getElementById('copyIssued').onclick=async function(){ try{ await navigator.clipboard.writeText(code); this.textContent='Copied'; }catch(e){} };
-      document.getElementById('useIssued').onclick=function(){
-        setBiz(code); updateGate();
-        // do NOT markOnboarded here; we want the welcome to play once on first tap
-        pop.classList.remove('open'); pop.setAttribute('aria-hidden','true'); history.replaceState(null,'','/');
-      };
-    })();
+  if(!LS.team()){ showGate(); } else { hideGate(); }
 
-    var teamCodeInput=document.getElementById('teamCode');
-    document.getElementById('saveCode').addEventListener('click', function(){
-      var v=(teamCodeInput.value||"").trim();
-      if(!/^[0-9]{4}-[0-9]{4}$/.test(v)){ showErr("Enter a code like 1234-5678"); return; }
-      setBiz(v); updateGate();
-      // do NOT markOnboarded here; we want the welcome to play once on first tap
-    });
+  code.addEventListener('input', e => { e.target.value = fmt(e.target.value); });
+  enter.addEventListener('click', ()=>{
+    const v = fmt(code.value);
+    if(!/^\d{4}-\d{4}$/.test(v)){ return err('Enter a code like 1234-5678'); }
+    LS.setTeam(v); hideGate();
+  });
+  buy.addEventListener('click', ()=>{ window.location.href = '/subscribe'; });
 
-    document.getElementById('buyBtn').addEventListener('click', function(){
-      location.href="https://buy.stripe.com/14A14ng1E3Gn4BmceI5sA0b";
-    });
+  // uploads
+  plus.addEventListener('click', ()=>{ files.style.display = files.style.display==='none'?'block':'none'; });
+  fileI.addEventListener('change', async ()=>{
+    const t = LS.team(); if(!t) return err('Enter your team code first.');
+    const f = fileI.files[0]; if(!f) return;
+    const text = await pdfToText(f).catch(()=>null);
+    if(!text) return err('Failed to read PDF.');
+    const res = await post('/.netlify/functions/files',{businessId:t,name:f.name,size:f.size,text});
+    const j = await res.json();
+    if(!res.ok||j.error) return err('Upload failed');
+    ok('Uploaded'); renderFiles();
+  });
+  async function renderFiles(){
+    const t = LS.team(); if(!t) return;
+    const r = await API('/.netlify/functions/files?businessId='+encodeURIComponent(t));
+    const j = await r.json(); if(!r.ok||j.error) { flist.textContent='Error loading files.'; return; }
+    flist.innerHTML = (j.docs||[]).map(d=>`<div>${d.name}</div>`).join('') || 'No files uploaded yet.';
+  }
+  renderFiles();
 
-    // Long-press mic => open gate (switch teams)
-    var voiceBtn=document.getElementById('voiceBtn'), pressTimer;
-    function startPress(){ clearTimeout(pressTimer); pressTimer=setTimeout(function(){ gate.style.display='flex'; }, 1200); }
-    function cancelPress(){ clearTimeout(pressTimer); }
-    voiceBtn.addEventListener('touchstart', startPress, {passive:true});
-    voiceBtn.addEventListener('mousedown', startPress);
-    voiceBtn.addEventListener('touchend', cancelPress);
-    voiceBtn.addEventListener('mouseup', cancelPress);
+  // --- audio core ---
+  let media, rec, chunks=[];
+  let speaking=false, awaitingRole=false;
 
-    // Upload modal
-    var openUpload=document.getElementById('openUpload'), uploadModal=document.getElementById('uploadModal'),
-        closeUpload=document.getElementById('closeUpload'), fileInput=document.getElementById('fileInput'),
-        uploadArea=document.getElementById('uploadArea'), fileList=document.getElementById('fileList');
+  async function firstRunIntro(){
+    const t = LS.team(); if(!t) return;
+    const r = await API('/.netlify/functions/brief?businessId='+encodeURIComponent(t)+'&first=1');
+    const j = await r.json();
+    if(j.audio) await play(j.audio);
+    awaitingRole = true; // next mic capture answers yes/no
+  }
 
-    openUpload.addEventListener('click', function(){ if(!hasCode()){ updateGate(); return; } uploadModal.classList.add('open'); uploadModal.setAttribute('aria-hidden','false'); renderFileList(); });
-    closeUpload.addEventListener('click', function(){ uploadModal.classList.remove('open'); uploadModal.setAttribute('aria-hidden','true'); });
+  async function quickWhatsNewThenListen(){
+    const t = LS.team(); if(!t) return;
+    const r = await API('/.netlify/functions/brief?businessId='+encodeURIComponent(t));
+    const j = await r.json();
+    if(j.audio) await play(j.audio);
+    await listenOnce({ role: LS.role()||'employee' });
+  }
 
-    // ===== Mic session with auto-stop on silence =====
-    var isSession=false,isListening=false,isProcessing=false,audioCtx,micStream,recorder,chunks=[],inflightCtrl=null,sessionId=null;
-    var sourceNode=null, analyser=null, monitorTimer=null, startedAt=0, lastHeardAt=0;
+  mic.addEventListener('click', async ()=>{
+    if(!LS.team()){ showGate(); return; }
+    if(speaking){ stopPlay(); return; }
 
-    function setState(cls){
-      voiceBtn.className='voice-button '+cls;
-      var map={idle:'Press to talk',listening:'Listening — tap to stop',thinking:'Working…',speaking:'Speaking — tap to interrupt',error:'Error — tap to retry'};
-      voiceBtn.setAttribute('aria-label', map[cls]||'Press to talk');
-    }
-    async function ensureAudio(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state!=='running') await audioCtx.resume(); }
-    function getPreferredMime(){
-      var isiOS=/iPad|iPhone|iPod/.test(navigator.userAgent), isSafari=/Safari/.test(navigator.userAgent)&&!/Chrome/.test(navigator.userAgent);
-      if(isiOS||isSafari){ if(window.MediaRecorder&&MediaRecorder.isTypeSupported('audio/mp4;codecs=mp4a.40.2')) return 'audio/mp4;codecs=mp4a.40.2';
-        if(window.MediaRecorder&&MediaRecorder.isTypeSupported('audio/mp4')) return 'audio/mp4'; }
-      else { if(window.MediaRecorder&&MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) return 'audio/webm;codecs=opus';
-        if(window.MediaRecorder&&MediaRecorder.isTypeSupported('audio/webm')) return 'audio/webm'; }
-      return '';
-    }
-
-    voiceBtn.addEventListener('click', async function(e){
-      e.preventDefault(); if(!hasCode()){ updateGate(); return; }
-      if(!isSession){
-        isSession=true; sessionId='sess_'+Date.now();
-        // First tap after joining a team -> onboarding brief (once)
-        var wantOnboard = isFirstRun();
-        try{
-          setState('thinking');
-          var r = await fetch('/.netlify/functions/brief', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ businessId:getBiz(), firstRun: wantOnboard })
-          });
-          var j={}; try{ j=await r.json(); }catch(e){}
-          if(j && j.audio){
-            var a=new Audio(); a.preload="none"; a.playsInline=true; a.src=j.audio; await a.play();
-            await new Promise(function(res){ a.onended=res; });
-          }
-          if(wantOnboard) markOnboarded();
-        }catch(e){ showErr(e&&e.stack?e.stack:e); }
-        startListening();
-      }else{
-        stopListening(true); isSession=false; setState('idle');
-      }
-    });
-
-    async function startListening(){
-      if(!hasCode()){ updateGate(); return; }
-      if(isListening||isProcessing) return;
-      isListening=true; setState('listening');
-      await ensureAudio();
-      micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
-      var mime=getPreferredMime(), opts={}; if(mime) opts.mimeType=mime;
-      recorder=new MediaRecorder(micStream,opts); chunks=[];
-      recorder.ondataavailable=function(e){ if(e.data&&e.data.size>0) chunks.push(e.data); };
-      recorder.onstop=processRecording; recorder.start(200);
-
-      // silence monitor
-      setupMonitor();
+    if(LS.first()){
+      await firstRunIntro();
+      await listenOnce({ expectRole:true });
+      return;
     }
 
-    function setupMonitor(){
-      try{
-        sourceNode = audioCtx.createMediaStreamSource(micStream);
-        analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 2048;
-        sourceNode.connect(analyser);
-        var data = new Uint8Array(analyser.fftSize);
-        startedAt = performance.now(); lastHeardAt = startedAt;
-        var THRESH = 0.015; // ~1.5% amplitude
-        var MIN_SPEECH_MS = 400;
-        var LINGER_MS = 900;
-        var MAX_MS = 12000;
-
-        function tick(){
-          if(!isListening || !recorder || recorder.state!=='recording'){ clearInterval(monitorTimer); return; }
-          analyser.getByteTimeDomainData(data);
-          // compute normalized RMS-ish
-          var sum=0;
-          for(var i=0;i<data.length;i++){
-            var v=(data[i]-128)/128;
-            sum+=v*v;
-          }
-          var rms=Math.sqrt(sum/data.length);
-          var now=performance.now();
-          if(rms>THRESH){ lastHeardAt=now; }
-          var spokeLongEnough=(now-startedAt)>MIN_SPEECH_MS;
-          var silentLongEnough=(now-lastHeardAt)>LINGER_MS;
-          var hitMax=(now-startedAt)>MAX_MS;
-          if((spokeLongEnough && silentLongEnough) || hitMax){
-            stopListening(false);
-          }
-        }
-        clearInterval(monitorTimer);
-        monitorTimer = setInterval(tick, 120);
-      }catch(e){
-        console.log('monitor setup failed', e);
-      }
+    const role = LS.role() || 'employee';
+    if(role==='employee'){
+      await quickWhatsNewThenListen();
+    }else{
+      await listenOnce({ role:'admin' });
     }
+  });
 
-    function stopListening(userStop){
-      try{ if(recorder && recorder.state==='recording') recorder.stop(); }catch(e){}
-      try{ if(micStream){ micStream.getTracks().forEach(function(t){ t.stop(); }); } }catch(e){}
-      isListening=false;
-      // cleanup monitor
-      try{ if(monitorTimer){ clearInterval(monitorTimer); monitorTimer=null; } }catch(e){}
-      try{ if(sourceNode){ sourceNode.disconnect(); sourceNode=null; } }catch(e){}
-      try{ if(analyser){ analyser.disconnect(); analyser=null; } }catch(e){}
-      if(userStop){ setState('idle'); }
+  // one-shot record + send
+  async function listenOnce(extra){
+    let mime = preferredMime();
+    try{
+      media = await navigator.mediaDevices.getUserMedia({ audio:true });
+      rec = new MediaRecorder(media, mime?{mimeType:mime}:undefined);
+    }catch(e){ return err('Mic unavailable'); }
+
+    chunks=[]; rec.ondataavailable=e=>{ if(e.data?.size>0) chunks.push(e.data); };
+    const p = new Promise(res=> rec.onstop = res);
+    rec.start(120);
+
+    // stop on 1.2s silence
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const src = ctx.createMediaStreamSource(media);
+    const proc = ctx.createScriptProcessor(1024,1,1);
+    src.connect(proc); proc.connect(ctx.destination);
+    let last = performance.now();
+    proc.onaudioprocess = ev=>{
+      const d=ev.inputBuffer.getChannelData(0);
+      let s=0; for(let i=0;i<d.length;i++) s += Math.abs(d[i]);
+      if(s/d.length > 0.003) last = performance.now();
+      if(performance.now()-last > 1200){ try{ rec.stop(); }catch{} }
+    };
+
+    await p;
+    proc.disconnect(); src.disconnect(); media.getTracks().forEach(t=>t.stop());
+
+    const blob = new Blob(chunks,{ type: rec.mimeType||'audio/webm' });
+    const b64 = await blobToB64(blob);
+    const payload = {
+      businessId: LS.team(),
+      audio: { data:b64, mime: blob.type, duration: 0 },
+      ...(extra||{})
+    };
+    const r = await post('/.netlify/functions/voice', payload);
+    const j = await r.json();
+    if(j.error){ return err(j.error); }
+    if(j.control?.role){ LS.setRole(j.control.role); LS.setFirstDone(); }
+    if(j.control?.askRoleAgain){ await listenOnce({ expectRole:true }); return; }
+    if(j.audio) await play(j.audio);
+  }
+
+  function preferredMime(){
+    const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const Safari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent);
+    if(iOS||Safari){
+      if(MediaRecorder.isTypeSupported("audio/mp4;codecs=mp4a.40.2")) return "audio/mp4;codecs=mp4a.40.2";
+      if(MediaRecorder.isTypeSupported("audio/mp4")) return "audio/mp4";
+    }else{
+      if(MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) return "audio/webm;codecs=opus";
+      if(MediaRecorder.isTypeSupported("audio/webm")) return "audio/webm";
     }
+    return "";
+  }
 
-    function blobToBase64(blob){ return new Promise(function(res,rej){ var r=new FileReader(); r.onloadend=function(){ try{ var s=String(r.result||''); res(s.split(',')[1]||''); }catch(e){ rej(e);} }; r.onerror=function(){ rej(r.error||new Error('readAsDataURL failed')); }; r.readAsDataURL(blob); }); }
+  async function blobToB64(b){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(",")[1]); r.onerror=()=>rej(r.error); r.readAsDataURL(b); }); }
 
-    async function processRecording(){
-      isListening=false; isProcessing=true; setState('thinking');
-      try{
-        var blob=new Blob(chunks,{type:(recorder&&recorder.mimeType)?recorder.mimeType:'audio/webm'}); chunks=[];
-        if(!blob.size){ isProcessing=false; setState('idle'); return; }
-        var b64=await blobToBase64(blob);
+  // audio playback
+  const a = new Audio(); a.preload="none"; a.playsInline=true;
+  function stopPlay(){ try{ a.pause(); a.currentTime=0; speaking=false; mic.classList.remove('yellow'); }catch{} }
+  async function play(url){
+    speaking=true; mic.classList.add('yellow');
+    a.src=url; a.volume=1.0;
+    try{ await a.play(); }catch(e){ err('play error'); }
+    await new Promise(res=> a.onended = ()=>{ speaking=false; mic.classList.remove('yellow'); res(); });
+  }
 
-        // proper abort/replace
-        try{ inflightCtrl && inflightCtrl.abort && inflightCtrl.abort(); }catch(e){}
-        inflightCtrl = new AbortController();
+  // toast
+  function err(s){ toast.textContent = String(s||'Error'); toast.style.display='block'; setTimeout(()=>toast.style.display='none',2800); }
+  function ok(s){ toast.textContent = String(s||'OK'); toast.style.background='#16a34a'; toast.style.display='block'; setTimeout(()=>{toast.style.display='none'; toast.style.background="#cc3333";},1600); }
 
-        var payload={ businessId:getBiz(), sessionId:sessionId, mode:isAdminArmed()?'admin-armed':'normal', audio:{data:b64,mime:blob.type} };
-        var resp=await fetch('/.netlify/functions/voice',{
-          method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify(payload),signal:inflightCtrl.signal
-        });
-        var data={}; try{ data=await resp.json(); }catch(e){ data={}; }
-
-        if(data && data.control){
-          if(data.control.adminArmed) armAdmin();
-          if(data.control.adminDisarm) disarmAdmin();
-          if(data.control.requireCode){ setBiz(""); updateGate(); }
-        }
-        if(data && data.error){ showErr(data.error); }
-
-        if(data && data.audio){
-          var a=new Audio(); a.preload="none"; a.playsInline=true; a.src=data.audio; await a.play();
-          await new Promise(function(r){ a.onended=r; });
-          setState('idle');
-        } else {
-          setState('idle');
-        }
-        isProcessing=false;
-        if(isSession) startListening(); // continue VAD loop
-      }catch(e){
-        isProcessing=false; setState('error'); showErr(e&&e.stack?e.stack:e);
-      }
+  // naive PDF->text (lazy-loaded)
+  async function pdfToText(file){
+    const { getDocument } = await import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs');
+    const ab = await file.arrayBuffer();
+    const doc = await getDocument({ data: ab }).promise;
+    let out = "";
+    for(let p=1;p<=Math.min(doc.numPages,40);p++){
+      const page = await doc.getPage(p);
+      const txt = await page.getTextContent();
+      out += " " + txt.items.map(i=>i.str).join(" ");
     }
-
-    // ===== Uploads =====
-    fileInput.addEventListener('change', async function(){
-      var files=Array.from(fileInput.files||[]); if(!files.length) return;
-      for(var i=0;i<files.length;i++){
-        var file=files[i]; if(file.size>10*1024*1024){ showProgress(file.name,'Too large (max 10MB)',0,true); continue; }
-        var slot=showProgress(file.name,'Reading…',0);
-        try{
-          var ext=(file.name.split('.').pop()||'').toLowerCase(); var textObj;
-          if(ext==='pdf'){ updateProgress(slot,8,'Loading PDF engine…'); await ensurePdfJs(); textObj=await extractPdfText(file,function(p){ updateProgress(slot,p,'Extracting…'); }); }
-          else { var t=await file.text(); textObj={text:t}; updateProgress(slot,60,'Processing…'); }
-          updateProgress(slot,70,'Uploading…'); await uploadDoc(file.name,file.size,textObj.text); updateProgress(slot,100,'Completed',true);
-        }catch(err){ updateProgress(slot,0,'Failed',true,true); showErr(err&&err.stack?err.stack:err); }
-      }
-      await renderFileList(); fileInput.value='';
-    });
-
-    async function ensurePdfJs(){ if(window.pdfjsLib) return; await new Promise(function(res,rej){ var s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.2.67/pdf.min.js'; s.async=true; s.onload=res; s.onerror=function(){ rej(new Error('Failed to load pdf.js')); }; document.head.appendChild(s); }); }
-    async function extractPdfText(file,onProg){ onProg(12); var buf=await file.arrayBuffer(); onProg(20); var pdf=await window.pdfjsLib.getDocument({data:buf}).promise; onProg(30); var text=''; for(var p=1;p<=pdf.numPages;p++){ var page=await pdf.getPage(p); var cnt=await page.getTextContent(); var seg=cnt.items.map(function(it){ return it.str; }).join(' '); text+=seg+'\n'; onProg(30+Math.floor((p/pdf.numPages)*40)); } return {text:text}; }
-    function showProgress(name,label,pct,done,error){ var wrap=document.createElement('div'); wrap.className='item'; wrap.innerHTML='<div class="meta">'+escapeHtml(name)+'</div><div style="flex:1;margin-left:10px"><div class="bar"><div class="fill" style="width:'+(pct||0)+'%"></div></div><div class="meta">'+label+(done?(error?'':' <span class="chk">✔</span>'):'')+'</div></div>'; uploadArea.prepend(wrap); return wrap; }
-    function updateProgress(slot,pct,label,done){ var fill=slot.querySelector('.fill'); if(fill) fill.style.width=(pct||0)+'%'; var metas=slot.querySelectorAll('.meta'); var meta=metas[metas.length-1]; if(meta&&label) meta.innerHTML=label+(done?' <span class="chk">✔</span>':''); }
-    async function uploadDoc(name,size,text){ var r=await fetch('/.netlify/functions/files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:getBiz(),name:name,size:size,text:text})}); if(!r.ok){ var t=await r.text(); throw new Error('upload failed: '+r.status+' '+t); } return r.json(); }
-    async function renderFileList(){ try{ var r=await fetch('/.netlify/functions/files?businessId='+encodeURIComponent(getBiz())); var j={}; try{ j=await r.json(); }catch(e){} var docs=j.docs||[]; fileList.innerHTML= docs.length ? docs.map(function(d){ var kb=Math.round((d.size||0)/1024); return '<div class="item"><div class="meta">'+escapeHtml(d.name)+' <span style="opacity:.6;font-size:12px">('+kb+' KB)</span></div><button class="btn" data-id="'+escapeHtml(d.id)+'">Remove</button></div>'; }).join('') : '<div class="meta" style="opacity:.75">No files uploaded yet.</div>'; var btns=fileList.querySelectorAll('button[data-id]'); for(var i=0;i<btns.length;i++){ btns[i].onclick=(function(b){ return async function(){ await fetch('/.netlify/functions/files?businessId='+encodeURIComponent(getBiz())+'&id='+encodeURIComponent(b.getAttribute('data-id')),{method:'DELETE'}); renderFileList(); }; })(btns[i]); } }catch(e){} }
-    function escapeHtml(s){ return String(s||"").replace(/[&<>"']/g,function(m){ return({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[m]; }); }
-
-  }catch(e){ showErr(e&&e.stack?e.stack:e); }
+    return out.replace(/\s+/g,' ').trim().slice(0, 20000);
+  }
 })();
 </script>
 </body>
