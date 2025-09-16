@@ -8,38 +8,21 @@ const STT_MODEL = "whisper-1";
 const TTS_MODEL = "tts-1";
 const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || "shimmer";
 
-// how long a “daily brief” looks back
 const BRIEF_WINDOW_HOURS = Number(process.env.BRIEF_WINDOW_HOURS || 24);
-// how long an admin-armed session lasts on the server side (device also keeps a flag)
 const ADMIN_ARM_MIN = 8;
 
 const mem = globalThis.__NORA_MEM__ || (globalThis.__NORA_MEM__ = new Map());
 const admins = globalThis.__NORA_ADM__ || (globalThis.__NORA_ADM__ = new Map());
-// docs are stored by files.js in globalThis.__NORA_DOCS__
-function getDocsMap() {
-  return globalThis.__NORA_DOCS__ || (globalThis.__NORA_DOCS__ = new Map());
-}
+function getDocsMap(){ return globalThis.__NORA_DOCS__ || (globalThis.__NORA_DOCS__ = new Map()); }
 
-function now() { return Date.now(); }
-function isValidCode(code) { return /^[0-9]{4}-[0-9]{4}$/.test(code || ""); }
-function getTeam(businessId) {
-  let t = mem.get(businessId);
-  if (!t) {
-    t = { updates: [], longterm: [] };
-    mem.set(businessId, t);
-  }
-  return t;
-}
-function armAdmin(businessId) {
-  admins.set(businessId, { until: now() + ADMIN_ARM_MIN * 60 * 1000 });
-}
-function isAdminArmed(businessId) {
-  const a = admins.get(businessId);
-  return a && a.until > now();
-}
-function disarmAdmin(businessId) { admins.delete(businessId); }
+function now(){ return Date.now(); }
+function isValidCode(code){ return /^[0-9]{4}-[0-9]{4}$/.test(code || ""); }
+function getTeam(businessId){ let t = mem.get(businessId); if(!t){ t={updates:[],longterm:[]}; mem.set(businessId,t);} return t; }
+function armAdmin(businessId){ admins.set(businessId, { until: now() + ADMIN_ARM_MIN*60*1000 }); }
+function isAdminArmed(businessId){ const a = admins.get(businessId); return a && a.until > now(); }
+function disarmAdmin(businessId){ admins.delete(businessId); }
 
-function reply(statusCode, data) {
+function reply(statusCode, data){
   return {
     statusCode,
     headers: {
@@ -52,7 +35,7 @@ function reply(statusCode, data) {
 }
 
 export const handler = async (event) => {
-  if (event.httpMethod === "OPTIONS") return reply(200, { ok: true });
+  if (event.httpMethod === "OPTIONS") return reply(200, { ok:true });
 
   try {
     const body = JSON.parse(event.body || "{}");
@@ -60,90 +43,89 @@ export const handler = async (event) => {
     const mode = body.mode || "normal";
     const audio = body.audio || null;
 
-    // enforce team code gate
     if (!isValidCode(businessId)) {
-      return reply(200, {
-        error: "missing_or_bad_team_code",
-        control: { requireCode: true },
-      });
+      return reply(200, { error:"missing_or_bad_team_code", control:{ requireCode:true } });
     }
 
-    // no audio? just say idle
+    // silent ping (no audio) -> say ready
     if (!audio?.data || !audio?.mime) {
-      const say = "I'm ready when you are.";
+      const say = "I’m ready. If you’re the admin, say “admin” to add updates.";
       const tts = await ttsSay(say);
       return reply(200, { sessionId: "sess_" + now(), response: say, audio: tts });
     }
 
-    // 1) STT
-    const transcript = await transcribe(audio.data, audio.mime);
+    // STT
+    let transcript;
+    try { transcript = await transcribe(audio.data, audio.mime); }
+    catch (sttErr) {
+      const say = "I couldn’t hear that. Try again, or move closer to the mic.";
+      const tts = await ttsSay(say);
+      return reply(200, { response:say, audio:tts, error:String(sttErr) });
+    }
     const spoken = (transcript || "").trim();
     if (!spoken) {
       const say = "I didn’t catch that. Try again.";
       const tts = await ttsSay(say);
       return reply(200, { response: say, audio: tts });
     }
-
-    // 2) ROUTING
     const lc = spoken.toLowerCase();
 
-    // --- admin arm/disarm keywords (device says only "admin" to arm) ---
+    // Admin arm/disarm
     if (/^\s*(admin|admin mode)\s*$/.test(lc)) {
       armAdmin(businessId);
-      const say = "Admin mode activated. Say your updates, or say done when finished.";
+      const say = "Admin mode activated. Say your updates, or say “long-term: …” for permanent info. Say “done” when finished.";
       const tts = await ttsSay(say);
-      return reply(200, { response: say, audio: tts, control: { adminArmed: true } });
+      return reply(200, { response:say, audio:tts, control:{ adminArmed:true } });
     }
     if (/^(done|finish|finished|we're done|we are done)\.?$/i.test(spoken)) {
       disarmAdmin(businessId);
       const say = "Got it. Admin mode off.";
       const tts = await ttsSay(say);
-      return reply(200, { response: say, audio: tts, control: { adminDisarm: true } });
+      return reply(200, { response:say, audio:tts, control:{ adminDisarm:true } });
     }
 
-    // --- admin update capture ---
+    // Admin update capture
     if (isAdminArmed(businessId) || mode === "admin-armed") {
       const team = getTeam(businessId);
 
-      // long-term memory toggle
+      // long-term
       if (/^\s*(long\s*term|permanent|static)\s*[:\-]?\s*/i.test(spoken)) {
         const content = spoken.replace(/^\s*(long\s*term|permanent|static)\s*[:\-]?\s*/i, "").trim();
         if (content) {
           team.longterm.push({ ts: now(), text: content });
           const say = "Saved to long-term memory.";
           const tts = await ttsSay(say);
-          return reply(200, { response: say, audio: tts });
+          return reply(200, { response:say, audio:tts });
         }
       }
-      // deletions
+      // delete
       if (/^\s*(delete|forget)\s+/i.test(spoken)) {
         const q = spoken.replace(/^\s*(delete|forget)\s+/i, "").trim();
         const beforeLT = team.longterm.length, beforeU = team.updates.length;
         team.longterm = team.longterm.filter(x => !includesFuzzy(x.text, q));
-        team.updates = team.updates.filter(x => !includesFuzzy(x.text, q));
-        const say = (team.longterm.length !== beforeLT || team.updates.length !== beforeU)
-          ? "Deleted."
-          : "I couldn’t find that to delete.";
+        team.updates  = team.updates.filter(x => !includesFuzzy(x.text, q));
+        const say = (team.longterm.length !== beforeLT || team.updates.length !== beforeU) ? "Deleted." : "I couldn’t find that to delete.";
         const tts = await ttsSay(say);
-        return reply(200, { response: say, audio: tts });
+        return reply(200, { response:say, audio:tts });
       }
 
-      // default: treat as daily update
+      // default: daily update
       team.updates.push({ ts: now(), text: spoken });
       const say = "Added to today’s updates.";
       const tts = await ttsSay(say);
-      return reply(200, { response: say, audio: tts });
+      return reply(200, { response:say, audio:tts });
     }
 
-    // --- employee Q&A ---
+    // Employee Q&A
     const say = await answerEmployee(businessId, spoken);
     const tts = await ttsSay(say);
-    return reply(200, { response: say, audio: tts });
+    return reply(200, { response:say, audio:tts });
   } catch (e) {
     console.error(e);
-    const say = "I hit an error. Please try again.";
+    let say = "I hit an error. Please try again.";
+    try { say += " If you’re the admin, you can say “admin” to add updates."; } catch {}
     const tts = await ttsSay(say).catch(() => null);
-    return reply(200, { error: "server_error", response: say, audio: tts || undefined });
+    return reply(200, { error: String(e && e.message || e), response: say, audio: tts || undefined });
   }
 };
 
@@ -186,17 +168,8 @@ async function ttsSay(text) {
   return `data:audio/mpeg;base64,${b}`;
 }
 
-function includesFuzzy(hay, needle) {
-  hay = (hay || "").toLowerCase();
-  needle = (needle || "").toLowerCase();
-  if (!needle) return false;
-  return hay.includes(needle);
-}
-
-function pickRecent(updates, hours) {
-  const cutoff = now() - hours * 3600 * 1000;
-  return (updates || []).filter(u => (u.ts || 0) >= cutoff);
-}
+function includesFuzzy(hay, needle){ hay=(hay||"").toLowerCase(); needle=(needle||"").toLowerCase(); if(!needle) return false; return hay.includes(needle); }
+function pickRecent(updates,hours){ const cutoff = Date.now() - hours*3600*1000; return (updates||[]).filter(u => (u.ts||0) >= cutoff); }
 
 async function answerEmployee(businessId, question) {
   const docsMap = getDocsMap();
@@ -205,7 +178,6 @@ async function answerEmployee(businessId, question) {
   const longterm = team.longterm || [];
   const docs = docsMap.get(businessId) || [];
 
-  // build small corpus
   const sources = [];
   if (recent.length) sources.push("Recent updates:\n" + recent.map(u => "- " + u.text).join("\n"));
   if (longterm.length) sources.push("Long-term info:\n" + longterm.map(u => "- " + u.text).join("\n"));
@@ -213,14 +185,12 @@ async function answerEmployee(businessId, question) {
     const docSnips = docs.slice(-12).map(d => `- ${d.name}: ${d.text.slice(0, 1200)}`);
     sources.push("Documents (latest):\n" + docSnips.join("\n"));
   }
-  if (!sources.length) {
-    return "No updates or files yet. Ask your admin to add updates or upload a PDF.";
-  }
+  if (!sources.length) return "No updates or files yet.";
 
   const system = [
-    "You are Nora, a strictly retrieval-based voice assistant for a business team.",
-    "Answer ONLY using the provided updates, long-term info, and document snippets.",
-    "If an answer is not present, say you don’t have that information.",
+    "You are Nora, a strictly retrieval-based team assistant.",
+    "Answer ONLY using the provided updates, permanent notes, and document snippets.",
+    "If it’s not there, say you don’t have that information.",
     "Be concise, warm, and plain. 2–4 sentences.",
   ].join(" ");
 
