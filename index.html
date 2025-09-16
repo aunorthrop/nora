@@ -6,79 +6,52 @@
 <title>Nora — voice-first team updates</title>
 <style>
   :root{
-    --bg:#0e0f13;
-    --tile:#151821;
-    --text:#e5e7ee;
-    --muted:#9aa3b2;
-    --ok:#22c55e;
-    --warn:#facc15;
-    --err:#ef4444;
-    --lav:#a78bfa;   /* lavender accent */
-    --lav-ghost:#a78bfa22;
+    --bg:#0e0f13; --tile:#151821; --text:#e5e7ee; --muted:#9aa3b2;
+    --ok:#22c55e; --warn:#facc15; --err:#ef4444;
+    --lav:#a78bfa; --lav-ghost:#a78bfa22;
   }
-  html,body{height:100%}
-  body{
-    margin:0;background:var(--bg);color:var(--text);
-    display:flex;align-items:center;justify-content:center;
-    font-family:ui-sans-serif,system-ui,-apple-system,"Inter",Segoe UI,Roboto,Arial;
-    -webkit-user-select:none;user-select:none;touch-action:manipulation;
-  }
-  .mic{
-    width:180px;height:180px;border-radius:24px;border:none;
-    background:#1f2330; box-shadow:0 10px 40px #0006, inset 0 -2px 0 #000a;
-    display:flex;align-items:center;justify-content:center; cursor:pointer;
-    transition:transform .06s ease, background .15s ease, box-shadow .15s ease;
-  }
+  html,body{height:100%} body{margin:0;background:var(--bg);color:var(--text);
+    display:flex;align-items:center;justify-content:center;font-family:ui-sans-serif,system-ui,-apple-system,"Inter",Segoe UI,Roboto,Arial;
+    -webkit-user-select:none;user-select:none;touch-action:manipulation;}
+  .mic{width:180px;height:180px;border-radius:24px;border:none;background:#1f2330;
+    box-shadow:0 10px 40px #0006, inset 0 -2px 0 #000a;display:flex;align-items:center;justify-content:center;cursor:pointer;
+    transition:transform .06s ease, background .15s ease, box-shadow .15s ease;}
   .mic svg{width:42px;height:42px;fill:#e8ebf5;opacity:.95}
-  .mic:active{transform:scale(.985)}
-  .idle{background:#1f2330}
-  .listening{background:var(--lav); box-shadow:0 0 0 10px var(--lav-ghost),0 10px 40px #0008}
-  .speaking{background:var(--ok)}
-  .thinking{background:var(--warn); color:#111}
-  .error{background:var(--err)}
-  .fab{position:fixed; right:18px; top:18px; width:42px; height:42px; border-radius:10px; background:#1f2330; display:flex; align-items:center; justify-content:center; box-shadow:0 6px 24px #0006; }
+  .mic:active{transform:scale(.985)} .idle{background:#1f2330}
+  .listening{background:var(--lav);box-shadow:0 0 0 10px var(--lav-ghost),0 10px 40px #0008}
+  .speaking{background:var(--ok)} .thinking{background:var(--warn)} .error{background:var(--err)}
+  .fab{position:fixed;right:18px;top:18px;width:42px;height:42px;border-radius:10px;background:#1f2330;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 24px #0006}
   .fab svg{width:22px;height:22px;fill:#cbd5e1}
-  .gate{
-    position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:#0009; z-index:40;
-  }
-  .card{width:min(92vw,560px); background:#141824; border:1px solid #202334; border-radius:16px; padding:18px 18px 14px}
-  .row{display:flex; gap:10px; margin-top:12px}
-  .in{flex:1; background:#0f1220; border:1px solid #202334; border-radius:10px; color:#e5e7ee; padding:12px 14px; outline:none}
-  .btn{padding:12px 14px; background:#334155; border:none; border-radius:10px; color:#e5e7ee; cursor:pointer}
+  .gate{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0009;z-index:40}
+  .card{width:min(92vw,560px);background:#141824;border:1px solid #202334;border-radius:16px;padding:18px 18px 14px}
+  .row{display:flex;gap:10px;margin-top:12px}
+  .in{flex:1;background:#0f1220;border:1px solid #202334;border-radius:10px;color:#e5e7ee;padding:12px 14px;outline:none}
+  .btn{padding:12px 14px;background:#334155;border:none;border-radius:10px;color:#e5e7ee;cursor:pointer}
   .btn.primary{background:#2563eb}
-  .toast{
-    position:fixed; left:50%; bottom:14px; transform:translateX(-50%);
-    background:#1f2330; color:#fff; padding:10px 14px; border-radius:10px;
-    border:1px solid #2a2f44; box-shadow:0 8px 30px #0007; font-size:14px; z-index:50;
-  }
+  .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#1f2330;color:#fff;padding:10px 14px;border-radius:10px;border:1px solid #2a2f44;box-shadow:0 8px 30px #0007;font-size:14px;z-index:50}
 </style>
 </head>
 <body>
 
-<!-- gate (first run or no code) -->
 <div id="gate" class="gate" style="display:none">
   <div class="card">
     <div style="font-weight:600">Join your team on Nora</div>
-    <div style="color:var(--muted); font-size:14px; margin-top:6px">
-      Enter the 8-digit team code (####-####) you received after subscribing.
-    </div>
+    <div style="color:#9aa3b2;font-size:14px;margin-top:6px">Enter the 8-digit team code (####-####) you received after subscribing.</div>
     <div class="row">
       <input id="teamCode" class="in" placeholder="1234-5678" inputmode="numeric" maxlength="9">
       <button id="enterBtn" class="btn">Enter</button>
     </div>
-    <div style="display:flex;justify-content:space-between; align-items:center; margin-top:10px">
-      <div style="color:#94a3b8; font-size:12px">Demo code: <b>1234-5678</b></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+      <div style="color:#94a3b8;font-size:12px">Demo code: <b>1234-5678</b></div>
       <button id="buyBtn" class="btn primary">Subscribe — $10/mo</button>
     </div>
   </div>
 </div>
 
-<!-- main mic -->
 <button id="mic" class="mic idle" aria-label="Tap to toggle Nora">
-  <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/></svg>
+  <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c1.66 0 3 1.34 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/></svg>
 </button>
 
-<!-- upload FAB kept (top-right) -->
 <div id="uploadFab" class="fab" title="Upload PDFs">
   <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
 </div>
@@ -87,131 +60,69 @@
 <script>
 (() => {
   const mic = document.getElementById('mic');
-  const gate = document.getElementById('gate');
-  const teamCodeIn = document.getElementById('teamCode');
-  const enterBtn = document.getElementById('enterBtn');
-  const buyBtn = document.getElementById('buyBtn');
-  const fileInput = document.getElementById('fileInput');
-  const uploadFab = document.getElementById('uploadFab');
+  const gate= document.getElementById('gate');
+  const codeIn=document.getElementById('teamCode');
+  const enterBtn=document.getElementById('enterBtn');
+  const buyBtn=document.getElementById('buyBtn');
+  const uploadFab=document.getElementById('uploadFab');
+  const fileInput=document.getElementById('fileInput');
 
-  const LS_CODE = 'nora_team_code';
-  const API_VOICE = '/.netlify/functions/voice';
-  const API_UPLOAD = '/.netlify/functions/upload';
-  const STRIPE_CHECKOUT = '/.netlify/functions/checkout';
+  const LS_CODE='nora_team_code';
+  const LS_INTRO_PREFIX='nora_intro_done_';
+  const API_VOICE='/.netlify/functions/voice';
+  const API_UPLOAD='/.netlify/functions/upload';
 
-  // ---------- UI helpers ----------
-  function setState(cls){
-    mic.className = `mic ${cls}`;
-  }
+  // --- toast ---
   let toastEl;
-  function toast(msg){
-    try{ toastEl?.remove(); }catch{}
-    toastEl = document.createElement('div');
-    toastEl.className='toast'; toastEl.textContent = msg;
-    document.body.appendChild(toastEl);
-    setTimeout(()=>{ try{toastEl.remove();}catch{} }, 3000);
-  }
+  function toast(m){ try{toastEl?.remove();}catch{}; toastEl=document.createElement('div'); toastEl.className='toast'; toastEl.textContent=m; document.body.appendChild(toastEl); setTimeout(()=>{try{toastEl.remove();}catch{}},3000); }
+  function setState(c){ mic.className='mic '+c; }
 
-  // ---------- gate ----------
-  function showGate(){
-    gate.style.display='flex';
-    const saved = localStorage.getItem(LS_CODE)||'';
-    teamCodeIn.value = saved || '';
-  }
+  // --- gate (code) ---
+  function normCode(s){ const t=String(s||'').replace(/[^0-9]/g,'').slice(0,8); return t.length===8? t.slice(0,4)+'-'+t.slice(4):''; }
+  function showGate(){ gate.style.display='flex'; codeIn.value=localStorage.getItem(LS_CODE)||''; }
   function hideGate(){ gate.style.display='none'; }
 
-  function normalizeCode(s){
-    const t = String(s||'').replace(/[^0-9]/g,'').slice(0,8);
-    if(t.length<8) return '';
-    return t.slice(0,4)+'-'+t.slice(4,8);
-  }
+  buyBtn.onclick=()=>{ window.location.href='https://buy.stripe.com/test_1234567890'; };
+  enterBtn.onclick=()=>{ const c=normCode(codeIn.value)||codeIn.value.trim(); if(!/^\d{4}-\d{4}$/.test(c)){ toast('Enter a code like 1234-5678'); return; } localStorage.setItem(LS_CODE,c); hideGate(); /* intro will run on first tap */ };
+  if(!localStorage.getItem(LS_CODE)) showGate();
 
-  // demo purchase link (you can swap to real checkout function later)
-  buyBtn.onclick = () => {
-    window.location.href = 'https://buy.stripe.com/test_1234567890'; // placeholder/test
-  };
-
-  enterBtn.onclick = () => {
-    const code = normalizeCode(teamCodeIn.value) || teamCodeIn.value.trim();
-    if(!/^\d{4}-\d{4}$/.test(code)){ toast('Enter a code like 1234-5678'); return; }
-    localStorage.setItem(LS_CODE, code);
-    hideGate();
-    introOnce();
-  };
-
-  // show gate if no code
-  const existing = localStorage.getItem(LS_CODE);
-  if(!existing){ showGate(); }
-
-  // ---------- audio priming & session ----------
+  // --- audio priming ---
   let audioCtx, primed=false, isOn=false, isSpeaking=false, inflight=null;
-  const speaker = new Audio(); speaker.preload='none'; speaker.playsInline = true;
+  const speaker=new Audio(); speaker.preload='none'; speaker.playsInline=true;
+  async function ensureAudio(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state!=='running') await audioCtx.resume(); }
+  async function primeAudioOnce(){ if(primed) return; try{ await ensureAudio(); const b=audioCtx.createBuffer(1,1,audioCtx.sampleRate); const s=audioCtx.createBufferSource(); s.buffer=b; s.connect(audioCtx.destination); s.start(0); speaker.src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="; await speaker.play().catch(()=>{}); speaker.pause(); speaker.currentTime=0; primed=true; }catch{} }
 
-  async function ensureAudio(){
-    if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-    if(audioCtx.state!=='running') await audioCtx.resume();
-  }
-  async function primeAudioOnce(){
-    if(primed) return;
-    try{
-      await ensureAudio();
-      // 1. WebAudio 1-sample buffer tick
-      const b = audioCtx.createBuffer(1,1,audioCtx.sampleRate);
-      const s = audioCtx.createBufferSource(); s.buffer=b; s.connect(audioCtx.destination); s.start(0);
-      // 2. HTMLAudio silent blip to unlock play()
-      speaker.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
-      await speaker.play().catch(()=>{});
-      speaker.pause(); speaker.currentTime=0;
-      primed = true;
-    }catch(e){ /* keep going; we’ll retry */ }
-  }
-
-  // smarter playback with 3 fallbacks
   async function playAudio(dataUrl){
-    isSpeaking=true; setState('speaking');
-    await ensureAudio(); await primeAudioOnce();
-
-    // A) WebAudio decode path
+    isSpeaking=true; setState('speaking'); await ensureAudio(); await primeAudioOnce();
     try{
-      const ab = await (await fetch(dataUrl)).arrayBuffer();
-      const buf = await new Promise((res,rej)=>{
-        audioCtx.decodeAudioData(ab, res, rej);
-      });
-      await new Promise(res=>{
-        const src = audioCtx.createBufferSource();
-        src.buffer = buf; src.connect(audioCtx.destination);
-        src.onended = res; src.start(0);
-      });
+      const ab=await (await fetch(dataUrl)).arrayBuffer();
+      const buf=await new Promise((res,rej)=>audioCtx.decodeAudioData(ab,res,rej));
+      await new Promise(r=>{const src=audioCtx.createBufferSource(); src.buffer=buf; src.connect(audioCtx.destination); src.onended=r; src.start(0);});
       isSpeaking=false; return;
-    }catch(_){/* fall through */}
-    // B) Plain <audio> with data URL
-    try{
-      speaker.src=dataUrl; await speaker.play();
-      await new Promise(r=> speaker.onended = r);
-      isSpeaking=false; return;
-    }catch(_){/* fall through */}
-    // C) Blob URL
-    try{
-      const b64 = (dataUrl.split(',')[1]||"");
-      const bytes = Uint8Array.from(atob(b64), c=>c.charCodeAt(0));
-      const blob = new Blob([bytes], {type:'audio/mpeg'});
-      const url = URL.createObjectURL(blob);
-      speaker.src = url; await speaker.play();
-      await new Promise(r=> speaker.onended = r);
-      URL.revokeObjectURL(url);
-      isSpeaking=false; return;
-    }catch(e){
-      isSpeaking=false; setState('error'); toast('play error');
-    }
+    }catch(_){} try{
+      speaker.src=dataUrl; await speaker.play(); await new Promise(r=>speaker.onended=r); isSpeaking=false; return;
+    }catch(_){} try{
+      const b64=(dataUrl.split(',')[1]||""); const bytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0)); const blob=new Blob([bytes],{type:'audio/mpeg'}); const url=URL.createObjectURL(blob);
+      speaker.src=url; await speaker.play(); await new Promise(r=>speaker.onended=r); URL.revokeObjectURL(url); isSpeaking=false; return;
+    }catch(e){ isSpeaking=false; setState('error'); toast('play error'); }
   }
 
-  // ---------- mic toggle ----------
-  mic.addEventListener('click', async () => {
-    if(isSpeaking) { try{ speaker.pause(); }catch{} isSpeaking=false; setState(isOn?'listening':'idle'); return; }
+  // --- mic toggle (one-tap on/off) ---
+  mic.addEventListener('click', async ()=>{
+    if(isSpeaking){ try{speaker.pause();}catch{} isSpeaking=false; setState(isOn?'listening':'idle'); return; }
+    if(!localStorage.getItem(LS_CODE)){ showGate(); return; }
+
     if(!isOn){
       isOn=true; setState('listening'); await primeAudioOnce();
-      // short intro only once after code entry
-      introOnce();
+      // request server intro once per-team on first activation
+      const code = localStorage.getItem(LS_CODE);
+      const introKey = LS_INTRO_PREFIX+code;
+      if(!localStorage.getItem(introKey)){
+        try{
+          const r=await fetch(API_VOICE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,intro:true})});
+          const j=await r.json(); if(j.audio){ await playAudio(j.audio); localStorage.setItem(introKey,'1'); }
+        }catch(e){ toast('Intro failed'); }
+      }
       listenLoop();
     }else{
       isOn=false; setState('idle'); abortInFlight();
@@ -220,104 +131,44 @@
 
   function abortInFlight(){ try{ inflight?.abort(); }catch{} inflight=null; }
 
-  // ---------- STT/Voice loop ----------
+  // --- recorder + loop ---
   let media, rec, chunks=[];
-  async function startRecorder(){
-    const mime = pickMime();
-    media = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
-    rec = new MediaRecorder(media, mime?{mimeType:mime}:{});
-    chunks=[]; rec.ondataavailable = e=>{ if(e.data && e.data.size) chunks.push(e.data); };
-    return rec;
-  }
-  function stopRecorder(){ try{ rec?.stop(); }catch{} try{ media?.getTracks().forEach(t=>t.stop()); }catch{} }
+  function pickMime(){ const M=window.MediaRecorder; if(!M||!M.isTypeSupported) return ""; const p=["audio/mp4;codecs=mp4a.40.2","audio/m4a","audio/webm;codecs=opus","audio/webm","audio/mpeg","audio/wav"]; for(const m of p) if(M.isTypeSupported(m)) return m; return ""; }
+  async function startRecorder(){ const mime=pickMime(); media=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}}); rec=new MediaRecorder(media,mime?{mimeType:mime}:{});
+    chunks=[]; rec.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); }; return rec; }
+  function stopRecorder(){ try{rec?.stop();}catch{} try{media?.getTracks().forEach(t=>t.stop());}catch{} }
 
-  function pickMime(){
-    const M=window.MediaRecorder; if(!M||!M.isTypeSupported) return "";
-    const prefs=["audio/mp4;codecs=mp4a.40.2","audio/m4a","audio/webm;codecs=opus","audio/webm","audio/mpeg","audio/wav"];
-    for(const p of prefs) if(M.isTypeSupported(p)) return p;
-    return "";
-  }
+  function waitForUtterance(r){ return new Promise(resolve=>{ let start=performance.now(), last=start, seen=false; const t=setInterval(()=>{ const now=performance.now(); if(chunks.length){ seen=true; last=now; } if(seen && now-last>900){ clearInterval(t); try{r.stop();}catch{} setTimeout(()=>{ const blob=new Blob(chunks,{type:r.mimeType||'audio/webm'}); chunks=[]; resolve(blob.size>1500? blob:null); },120); } if(now-start>12000){ clearInterval(t); try{r.stop();}catch{} resolve(null); } },120); }); }
+  async function blobToB64(b){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onloadend=()=>res(String(fr.result).split(',')[1]); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(b); }); }
 
   async function listenLoop(){
     while(isOn){
       try{
         await ensureAudio();
-        const r = await startRecorder(); r.start(150);
-        const heard = await waitForUtterance(r); // resolves with Blob or null
-        stopRecorder();
-        if(!isOn) break;
-        if(!heard){ continue; }
-        const b64 = await blobToB64(heard);
-        const teamCode = localStorage.getItem(LS_CODE)||'';
-        inflight?.abort(); inflight = new AbortController();
-
+        const r=await startRecorder(); r.start(150);
+        const heard=await waitForUtterance(r); stopRecorder(); if(!isOn) break; if(!heard) continue;
+        const b64=await blobToB64(heard); const code=localStorage.getItem(LS_CODE)||''; inflight?.abort(); inflight=new AbortController();
         setState('thinking');
-        const resp = await fetch(API_VOICE,{
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({businessId:teamCode, audio:{data:b64, mime:heard.type}, role: window.__NORA_ROLE||'employee'}),
-          signal: inflight.signal
-        });
-        const data = await resp.json();
+        const resp=await fetch(API_VOICE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,audio:{data:b64,mime:heard.type},role:window.__NORA_ROLE||'employee'}),signal:inflight.signal});
+        const data=await resp.json();
         if(data.control?.requireCode){ isOn=false; setState('idle'); showGate(); toast('Enter your team code'); return; }
-        if(data.error){ setState('error'); toast(data.error); continue; }
-        if(data.control?.role){ window.__NORA_ROLE = data.control.role; }
+        if(data.control?.role){ window.__NORA_ROLE=data.control.role; }
         if(data.audio){ await playAudio(data.audio); }
+        else if(data.error){ toast(data.error); }
         setState(isOn?'listening':'idle');
-      }catch(e){
-        setState('error'); toast(String(e.message||e)); await new Promise(r=>setTimeout(r,400));
-        setState(isOn?'listening':'idle');
-      }
+      }catch(e){ setState('error'); toast(String(e.message||e)); await new Promise(r=>setTimeout(r,350)); setState(isOn?'listening':'idle'); }
     }
   }
 
-  function waitForUtterance(r){
-    return new Promise(resolve=>{
-      let started=performance.now(), last=started, seen=false;
-      const t = setInterval(()=> {
-        const dur = performance.now()-started;
-        const since = performance.now()-last;
-        if(chunks.length){ seen=true; last=performance.now(); }
-        if(seen && since>900){ clearInterval(t); try{ r.stop(); }catch{} setTimeout(()=>{
-          const blob = new Blob(chunks,{type:r.mimeType||'audio/webm'}); chunks=[];
-          resolve(blob.size>1500? blob : null);
-        },120); }
-        if(dur>12000){ clearInterval(t); try{ r.stop(); }catch{} resolve(null); }
-      },120);
-    });
-  }
-
-  async function blobToB64(blob){
-    return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onloadend=()=>res(String(fr.result).split(',')[1]); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(blob); });
-  }
-
-  // ---------- intro (first time after code entry only) ----------
-  function introOnce(){
-    if(window.__INTRO_DONE__) return;
-    window.__INTRO_DONE__ = true;
-    // Nora’s spoken intro comes from the server when you first talk.
-    // We keep the client silent here—just mark the flag.
-  }
-
-  // ---------- uploads ----------
+  // uploads (PDF only)
   uploadFab.onclick = ()=> fileInput.click();
-  fileInput.onchange = async () => {
-    const files = [...fileInput.files||[]].filter(f=>/pdf$/i.test(f.type));
-    if(!files.length){ toast('PDFs only'); return; }
-    const code = localStorage.getItem(LS_CODE)||'';
-    for(const f of files){
-      const b64 = await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onloadend=()=>res(String(fr.result).split(',')[1]); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(f); });
-      const r = await fetch(API_UPLOAD,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,name:f.name,data:b64})});
-      const j = await r.json();
-      if(j.error) toast('Upload failed: '+j.error); else toast('Uploaded '+f.name);
-    }
-    fileInput.value='';
-  };
+  fileInput.onchange = async ()=>{
+    const files=[...(fileInput.files||[])].filter(f=>/pdf$/i.test(f.type)); if(!files.length){ toast('PDFs only'); return; }
+    const code=localStorage.getItem(LS_CODE)||''; for(const f of files){ const b64=await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onloadend=()=>res(String(fr.result).split(',')[1]); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(f); }); const r=await fetch(API_UPLOAD,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,name:f.name,data:b64})}); const j=await r.json(); if(j.error) toast('Upload failed: '+j.error); else toast('Uploaded '+f.name); } fileInput.value=''; };
 
-  // surface unexpected errors instead of blank screen
-  window.addEventListener('error', e=> toast((e.message||'error')));
+  // surface errors
+  window.addEventListener('error', e=> toast(e.message||'error'));
   window.addEventListener('unhandledrejection', e=> toast(String(e.reason||'error')));
-
 })();
 </script>
 </body>
