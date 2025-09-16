@@ -31,27 +31,19 @@
 </style>
 </head>
 <body>
-  <!-- The ONLY visible UI -->
-  <button id="voiceBtn" class="voice-button idle" aria-label="Press to talk" title="">
+  <button id="voiceBtn" class="voice-button idle" aria-label="Press to talk">
     <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/>
+      <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c1.66 0 3-1.34 3-3zm7-3h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/>
     </svg>
   </button>
-
-  <!-- scope key (kept hidden) -->
   <input id="bizId" type="hidden" value="nora"/>
-
 <script>
 (() => {
   const voiceBtn = document.getElementById('voiceBtn');
   const BIZ_ID = (document.getElementById('bizId').value || 'nora');
 
-  // persistent lightweight memory (unchanged behavior, no UI)
   const LOCAL_KEY = `nora_voice_memory_${BIZ_ID}`;
-  function loadLocal(){
-    try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || '{"items":[],"conversations":[],"voice":"alloy","pace":0.95,"boot":false}'); }
-    catch { return { items:[], conversations:[], voice:"alloy", pace:0.95, boot:false }; }
-  }
+  function loadLocal(){ try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || '{"items":[],"conversations":[],"voice":"alloy","pace":0.95,"boot":false}'); } catch { return { items:[], conversations:[], voice:"alloy", pace:0.95, boot:false }; } }
   function saveLocal(m){ try { localStorage.setItem(LOCAL_KEY, JSON.stringify(m)); } catch(e){} }
   let memoryShadow = loadLocal();
   if (!memoryShadow.conversations) memoryShadow.conversations = [];
@@ -59,60 +51,39 @@
   memoryShadow.pace  = typeof memoryShadow.pace === "number" ? memoryShadow.pace : 0.95;
   saveLocal(memoryShadow);
 
-  // state
-  let isSession=false,isListening=false,isProcessing=false,isSpeaking=false;
+  let isSession=false,isListening=false,isProcessing=false,isSpeaking=false,hasBoot=false,uiLock=false;
   let sessionId=null,inflightController=null;
-  let audioCtx,micStream,micRecorder,chunks=[];
-  let audioProcessor,source,maxRecordTimer;
-  let startedAt=0,lastNonSilenceAt=0,hasBoot=false,uiLock=false;
-  const speaker = new Audio(); speaker.preload="none"; speaker.playsInline=true; speaker.volume=1.0;
+  let audioCtx,micStream,micRecorder,chunks=[],audioProcessor,source,maxRecordTimer;
+  let startedAt=0,lastNonSilenceAt=0;
+  const speaker=new Audio(); speaker.preload="none"; speaker.playsInline=true; speaker.volume=1.0;
+  let speakTimeout=null;
 
   function setBtnState(cls){
     voiceBtn.className = `voice-button ${cls}`;
-    const label = {
-      idle:"Press to talk",
-      listening:"Listening — tap to stop",
-      thinking:"Processing…",
-      speaking:"Speaking — tap to interrupt",
+    voiceBtn.setAttribute('aria-label', {
+      idle:"Press to talk", listening:"Listening — tap to stop",
+      thinking:"Processing…", speaking:"Speaking — tap to interrupt",
       error:"Error — tap to retry"
-    }[cls] || "Press to talk";
-    voiceBtn.setAttribute('aria-label', label);
+    }[cls] || "Press to talk");
   }
 
-  // ---- Boot / iOS priming ----
   async function bootOnce(){
     if (hasBoot) return true;
     try{
       if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
       if(audioCtx.state!=='running') await audioCtx.resume();
-
-      // prime output
       const buffer = audioCtx.createBuffer(1,1,audioCtx.sampleRate);
       const src = audioCtx.createBufferSource(); src.buffer=buffer; src.connect(audioCtx.destination); src.start(0);
-
-      // prime HTMLAudio (iOS)
       const SILENCE = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
-      speaker.volume = 0.01; speaker.src = SILENCE; speaker.play().catch(()=>{}); speaker.pause(); speaker.currentTime = 0; speaker.volume = 1.0;
-
-      // probe mic permissions
+      speaker.volume=0.01; speaker.src=SILENCE; speaker.play().catch(()=>{}); speaker.pause(); speaker.currentTime=0; speaker.volume=1.0;
       const test = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:true } });
       test.getTracks().forEach(t=>t.stop());
-
-      hasBoot = true; memoryShadow.boot = true; saveLocal(memoryShadow);
+      hasBoot=true; memoryShadow.boot=true; saveLocal(memoryShadow);
       return true;
-    }catch(e){
-      console.log("Boot failed:", e);
-      setBtnState('error');
-      hasBoot=false;
-      return false;
-    }
+    }catch(e){ setBtnState('error'); return false; }
   }
 
-  async function ensureAudioContext(){
-    if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-    if(audioCtx.state!=='running') await audioCtx.resume();
-  }
-
+  async function ensureAudioContext(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state!=='running') await audioCtx.resume(); }
   function getPreferredMime(){
     const isiOS=/iPad|iPhone|iPod/.test(navigator.userAgent);
     const isSafari=/Safari/.test(navigator.userAgent)&&!/Chrome/.test(navigator.userAgent);
@@ -125,7 +96,6 @@
     }
     return "";
   }
-
   async function getMicStream(){
     const tries = [
       { audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:true, sampleRate:48000, channelCount:1 }, video:false },
@@ -133,66 +103,46 @@
       { audio:{ echoCancellation:true }, video:false },
       { audio:true, video:false }
     ];
-    let lastErr;
-    for(const c of tries){
-      try{ return await navigator.mediaDevices.getUserMedia(c); }
-      catch(e){ lastErr = e; }
-    }
-    throw lastErr || new Error("Microphone not available");
+    for(const c of tries){ try{ return await navigator.mediaDevices.getUserMedia(c); } catch{} }
+    throw new Error("Microphone not available");
   }
-
-  function stopSpeaker(){ try{ speaker.pause(); speaker.currentTime=0; isSpeaking=false; }catch{} }
+  function stopSpeaker(){ try{ speaker.pause(); speaker.currentTime=0; isSpeaking=false; }catch{} if(speakTimeout){ clearTimeout(speakTimeout); speakTimeout=null; } if('speechSynthesis' in window){ window.speechSynthesis.cancel(); } }
   function cleanupAudioProcessing(){ clearTimeout(maxRecordTimer); try{audioProcessor?.disconnect();}catch{} audioProcessor=null; try{source?.disconnect();}catch{} source=null; }
   function cleanupMicrophone(){ cleanupAudioProcessing(); try{ micStream?.getTracks().forEach(t=>t.stop()); }catch{} micStream=null; }
 
   async function startListening(){
     if(isListening||isProcessing) return;
     try{
-      isListening = true; setBtnState('listening');
-      await ensureAudioContext();
-      micStream = await getMicStream();
-
-      const mime = getPreferredMime();
-      const opts = {}; if(mime) opts.mimeType = mime;
+      isListening=true; setBtnState('listening');
+      await ensureAudioContext(); micStream=await getMicStream();
+      const mime=getPreferredMime(); const opts={}; if(mime) opts.mimeType=mime;
       micRecorder = new MediaRecorder(micStream, opts);
-
-      chunks = []; startedAt = performance.now(); lastNonSilenceAt = startedAt;
-
-      micRecorder.ondataavailable = (e)=>{ if(e.data && e.data.size>0) chunks.push(e.data); };
-      micRecorder.onstop = async ()=>{ isListening=false; await processRecording(); };
-      micRecorder.onerror = (e)=>{ console.log('Recorder error:', e); isListening=false; cleanupMicrophone(); setBtnState('error'); };
-
+      chunks=[]; startedAt=performance.now(); lastNonSilenceAt=startedAt;
+      micRecorder.ondataavailable=(e)=>{ if(e.data&&e.data.size>0) chunks.push(e.data); };
+      micRecorder.onstop=async()=>{ isListening=false; await processRecording(); };
+      micRecorder.onerror=()=>{ isListening=false; cleanupMicrophone(); setBtnState('error'); };
       micRecorder.start(100);
       setupAudioProcessing();
-
-      maxRecordTimer = setTimeout(()=>{ try{ if(micRecorder?.state==='recording') micRecorder.stop(); }catch{} }, 12000);
-    }catch(e){
-      console.log("Start listen failed:", e);
-      setBtnState('error'); isListening=false; cleanupMicrophone();
-    }
+      maxRecordTimer=setTimeout(()=>{ try{ if(micRecorder?.state==='recording') micRecorder.stop(); }catch{} }, 12000);
+    }catch(e){ setBtnState('error'); isListening=false; cleanupMicrophone(); }
   }
-
   function setupAudioProcessing(){
     try{
       source = audioCtx.createMediaStreamSource(micStream);
       audioProcessor = audioCtx.createScriptProcessor(1024,1,1);
-      let hasSpeech=false;
-      const MIN_MS=500, LINGER_MS=1100, THRESH=0.0035;
+      let hasSpeech=false; const MIN_MS=500, LINGER_MS=1100, THRESH=0.0035;
       source.connect(audioProcessor); audioProcessor.connect(audioCtx.destination);
-      audioProcessor.onaudioprocess = (ev)=>{
+      audioProcessor.onaudioprocess=(ev)=>{
         if(!isListening) return;
-        const data = ev.inputBuffer.getChannelData(0);
+        const data=ev.inputBuffer.getChannelData(0);
         let sum=0; for(let i=0;i<data.length;i++) sum+=Math.abs(data[i]);
-        const avg = sum / data.length; const now = performance.now();
+        const avg=sum/data.length; const now=performance.now();
         if(avg>THRESH){ hasSpeech=true; lastNonSilenceAt=now; }
-        const elapsed = now-startedAt, since = now-lastNonSilenceAt;
-        if(hasSpeech && elapsed>MIN_MS && since>LINGER_MS){
-          try{ if(micRecorder?.state==='recording') micRecorder.stop(); }catch{}
-        }
+        const elapsed=now-startedAt, since=now-lastNonSilenceAt;
+        if(hasSpeech && elapsed>MIN_MS && since>LINGER_MS){ try{ if(micRecorder?.state==='recording') micRecorder.stop(); }catch{} }
       };
-    }catch(e){ console.log("Audio processing setup error:", e); }
+    }catch{}
   }
-
   async function blobToBase64(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onloadend=()=>{ const s=String(r.result||""); res(s.split(",")[1]||"");}; r.onerror=()=>rej(r.error||new Error("readAsDataURL failed")); r.readAsDataURL(blob); }); }
   async function getAudioDuration(blob){ return new Promise(r=>{ const a=new Audio(); a.onloadedmetadata=()=>r(a.duration||0); a.onerror=()=>r(0); a.src=URL.createObjectURL(blob); }); }
 
@@ -201,64 +151,53 @@
     try{
       isProcessing=true; setBtnState('thinking'); cleanupAudioProcessing();
       const blob=new Blob(chunks,{type:micRecorder?.mimeType||'audio/webm'}); chunks=[];
-      if(!blob.size || blob.size<1500){ isProcessing=false; if(isSession) setTimeout(()=>startListening(),200); else setBtnState('idle'); return; }
-      const duration=await getAudioDuration(blob);
-      const b64 = await blobToBase64(blob);
-      inflightController?.abort(); inflightController = new AbortController();
-
-      const payload = {
-        businessId: BIZ_ID,
-        sessionId,
-        memoryShadow,
-        audio:{ data:b64, mime: blob.type||'audio/webm', originalSize: blob.size, processedSize: blob.size, duration }
-      };
-
-      const resp = await fetch('/.netlify/functions/voice',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload), signal:inflightController.signal });
-      if(!resp.ok){ setBtnState('error'); console.log("Server error:", resp.status, resp.statusText); isProcessing=false; return; }
-      const data = await resp.json();
-      if(data.sessionId) sessionId = data.sessionId;
-      if(data.memoryShadow){ memoryShadow = data.memoryShadow; saveLocal(memoryShadow); }
-
-      if(data.control?.stopListening){ setBtnState('idle'); isProcessing=false; return; }
-      if(!data.audio){ isProcessing=false; if(isSession) setTimeout(()=>startListening(),200); else setBtnState('idle'); return; }
-
-      await playResponse(data.audio);
+      if(!blob.size||blob.size<1500){ isProcessing=false; if(isSession) setTimeout(()=>startListening(),200); else setBtnState('idle'); return; }
+      const duration=await getAudioDuration(blob); const b64=await blobToBase64(blob);
+      inflightController?.abort(); inflightController=new AbortController();
+      const payload={ businessId:BIZ_ID, sessionId, memoryShadow, audio:{ data:b64, mime:blob.type||'audio/webm', originalSize:blob.size, processedSize:blob.size, duration } };
+      const resp=await fetch('/.netlify/functions/voice',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload), signal:inflightController.signal });
+      if(!resp.ok){ setBtnState('error'); isProcessing=false; return; }
+      const data=await resp.json();
+      if(data.sessionId) sessionId=data.sessionId;
+      if(data.memoryShadow){ memoryShadow=data.memoryShadow; saveLocal(memoryShadow); }
+      const maxSpeakMs=Number(data.maxSpeakMs||6500);
+      if(data.audio){ await playResponse(data.audio,maxSpeakMs); }
+      else if(data.clientTTS && data.sayText){ await speakLocal(data.sayText,data.tone||"neutral",maxSpeakMs); }
+      isProcessing=false;
+      if(isSession){ setBtnState('listening'); setTimeout(()=>startListening(),150); } else setBtnState('idle');
     }catch(e){
-      console.log("Processing error:", e);
-      setBtnState('error');
-      if(isSession) setTimeout(()=>{ isProcessing=false; startListening(); }, 500); else isProcessing=false;
+      setBtnState('error'); if(isSession) setTimeout(()=>{ isProcessing=false; startListening(); }, 500); else isProcessing=false;
     }finally{ cleanupMicrophone(); }
   }
 
-  async function playResponse(dataUrl){
+  async function playResponse(dataUrl,maxSpeakMs){
     try{
-      isSpeaking=true; setBtnState('speaking');
-      await ensureAudioContext();
-      await playViaWebAudio(dataUrl);
-      isSpeaking=false; isProcessing=false;
-      if(isSession){ setBtnState('listening'); setTimeout(()=>startListening(),150); } else setBtnState('idle');
-    }catch{
-      try{
-        speaker.src=dataUrl; speaker.volume=1.0;
-        await speaker.play();
-        speaker.onended=()=>{ isSpeaking=false; isProcessing=false; if(isSession){ setBtnState('listening'); setTimeout(()=>startListening(),150);} else setBtnState('idle'); };
-      }catch{
-        isSpeaking=false; isProcessing=false; setBtnState('error'); if(isSession) setTimeout(()=>startListening(),300);
-      }
+      isSpeaking=true; setBtnState('speaking'); await ensureAudioContext();
+      let buf; try{ const r=await fetch(dataUrl); buf=await r.arrayBuffer(); }
+      catch{ const b=dataUrl.split(",")[1]||""; const bytes=Uint8Array.from(atob(b),c=>c.charCodeAt(0)); buf=bytes.buffer; }
+      const ab=await audioCtx.decodeAudioData(buf);
+      const gain=audioCtx.createGain(); gain.gain.value=1.12;
+      const s=audioCtx.createBufferSource(); s.buffer=ab; s.connect(gain); gain.connect(audioCtx.destination);
+      const done=new Promise(res=>{ s.onended=res; });
+      s.start(0);
+      speakTimeout=setTimeout(()=>{ try{ s.stop(); }catch{} }, maxSpeakMs);
+      await done;
+    }finally{
+      if(speakTimeout){ clearTimeout(speakTimeout); speakTimeout=null; }
+      isSpeaking=false;
     }
   }
-
-  async function playViaWebAudio(dataUrl){
-    await ensureAudioContext();
-    let buf;
-    try{ const r=await fetch(dataUrl); buf=await r.arrayBuffer(); }
-    catch{ const b=dataUrl.split(",")[1]||""; const bytes=Uint8Array.from(atob(b),c=>c.charCodeAt(0)); buf=bytes.buffer; }
-    const ab = await audioCtx.decodeAudioData(buf);
-    const gain = audioCtx.createGain(); gain.gain.value = 1.15;
-    await new Promise(res=>{
-      const s=audioCtx.createBufferSource(); s.buffer=ab; s.connect(gain); gain.connect(audioCtx.destination);
-      s.onended=res; s.start(0);
-    });
+  async function speakLocal(text,tone,maxSpeakMs){
+    if(!('speechSynthesis' in window)) return;
+    isSpeaking=true; setBtnState('speaking');
+    const u=new SpeechSynthesisUtterance(String(text||""));
+    if(tone==="cheerful"){ u.rate=1.03; u.pitch=1.05; }
+    else if(tone==="empathetic"){ u.rate=0.95; u.pitch=0.98; }
+    else if(tone==="serious"){ u.rate=0.92; u.pitch=0.95; }
+    else { u.rate=1.0; u.pitch=1.0; }
+    speakTimeout=setTimeout(()=>{ window.speechSynthesis.cancel(); isSpeaking=false; setBtnState('idle'); }, maxSpeakMs);
+    window.speechSynthesis.speak(u);
+    u.onend=()=>{ if(speakTimeout){ clearTimeout(speakTimeout); speakTimeout=null; } isSpeaking=false; setBtnState('idle'); };
   }
 
   function stopSession(){
@@ -268,20 +207,33 @@
     cleanupMicrophone(); setBtnState('idle');
   }
 
+  async function playBriefThenListen(){
+    try{
+      setBtnState('thinking');
+      const r = await fetch('/.netlify/functions/brief',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ businessId:BIZ_ID }) });
+      if(r.ok){
+        const j = await r.json();
+        const maxSpeakMs = Number(j.maxSpeakMs||6500);
+        if(j.audio){ await playResponse(j.audio, maxSpeakMs); }
+        else if(j.clientTTS && j.sayText){ await speakLocal(j.sayText, j.tone||"neutral", maxSpeakMs); }
+      }
+    }catch{}
+    await startListening();
+  }
+
   async function handleToggle(e){
     e.preventDefault(); if(uiLock) return; uiLock=true; voiceBtn.classList.add('pressed'); setTimeout(()=>voiceBtn.classList.remove('pressed'),120);
     try{
-      if(!memoryShadow.boot || !hasBoot){ const ok = await bootOnce(); if(!ok){ uiLock=false; return; } await new Promise(r=>setTimeout(r,75)); }
-      if(!isSession){ isSession=true; sessionId='nora_'+Date.now(); await startListening(); }
+      if(!memoryShadow.boot || !hasBoot){ const ok=await bootOnce(); if(!ok){ uiLock=false; return; } await new Promise(r=>setTimeout(r,75)); }
+      if(!isSession){ isSession=true; sessionId='nora_'+Date.now(); await playBriefThenListen(); }
       else { stopSession(); }
-    } catch(err){
-      console.log("Toggle error:", err); setBtnState('error'); setTimeout(()=>{ if(!isSession) setBtnState('idle'); }, 900);
-    } finally { setTimeout(()=>uiLock=false, 250); }
+    }catch(err){ setBtnState('error'); setTimeout(()=>{ if(!isSession) setBtnState('idle'); }, 900); }
+    finally{ setTimeout(()=>uiLock=false, 250); }
   }
 
   voiceBtn.addEventListener('click', handleToggle, { passive:false });
   voiceBtn.addEventListener('click', ()=>{ if(isSpeaking && isSession){ stopSpeaker(); } }, { passive:true });
-  voiceBtn.addEventListener('keydown', (e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); handleToggle(e);} });
+  voiceBtn.addEventListener('keydown',(e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); handleToggle(e); } });
 
   setBtnState('idle');
 })();
