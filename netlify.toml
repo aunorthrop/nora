@@ -1,10 +1,12 @@
 [build]
-  publish = "."
+  publish   = "."
   functions = "netlify/functions"
 
 [functions]
   node_bundler = "esbuild"
 
-# Per-function config (your handler file is netlify/functions/voice.js)
 [functions."voice"]
   timeout = 26
+
+[functions."brief"]
+  timeout = 20
