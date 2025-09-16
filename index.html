@@ -20,10 +20,12 @@
   .voice-button.speaking{background:#13c26b;color:#fff}
   .voice-button.error{background:#ff4d4f;color:#fff}
   .mic-icon{width:36px;height:36px;fill:currentColor}
+
   .plus{position:fixed;top:14px;right:14px;z-index:3000}
   .plus-btn{width:44px;height:44px;border:none;border-radius:12px;background:#1b5fff;color:#fff;cursor:pointer;
     box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:24px;line-height:44px;text-align:center}
   .plus-btn:active{transform:scale(.98)}
+
   .gate{position:fixed;inset:0;background:rgba(10,12,18,.92);display:flex;align-items:center;justify-content:center;padding:20px;z-index:5000}
   .gate-card{background:#141821;border:1px solid rgba(255,255,255,.07);border-radius:16px;max-width:520px;width:100%;padding:20px;box-shadow:0 18px 55px rgba(0,0,0,.45)}
   .h{font-weight:600;margin-bottom:6px}
@@ -32,6 +34,7 @@
   .btn{background:#242936;color:#e9eef6;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer}
   .btn:active{transform:scale(.98)}
   .buy{background:#1b5fff;color:#fff}
+
   .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:20px;z-index:4000}
   .modal.open{display:flex}
   .card{background:#141821;border:1px solid rgba(255,255,255,.07);border-radius:16px;max-width:520px;width:100%;padding:18px;box-shadow:0 18px 55px rgba(0,0,0,.45)}
@@ -39,15 +42,18 @@
   .file-choose{display:inline-block}
   .file-choose input{display:none}
   .file-choose label{display:inline-block;background:#E6E9F2;color:#111;border:none;border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer}
+
   .list{margin-top:12px;max-height:240px;overflow:auto;border-top:1px solid rgba(255,255,255,.06);padding-top:10px}
   .item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)}
   .bar{height:8px;background:#242936;border-radius:8px;overflow:hidden;margin-top:8px}
   .fill{height:100%;width:0;background:#1b5fff;transition:width .2s}
   .chk{margin-left:8px;color:#13c26b;font-size:14px}
+
   .pop{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:20px;z-index:6000}
   .pop.open{display:flex}
   .pop-card{background:#141821;border:1px solid rgba(255,255,255,.07);border-radius:16px;max-width:520px;width:100%;padding:20px;box-shadow:0 18px 55px rgba(0,0,0,.45)}
   .code{margin-top:10px;font-size:28px;font-weight:700;letter-spacing:2px;background:#0e1219;border-radius:12px;padding:14px 16px;text-align:center}
+
   .toast{position:fixed;bottom:12px;left:12px;background:#ff4d4f;color:#fff;padding:8px 10px;border-radius:10px;font-size:12px;box-shadow:0 6px 18px rgba(0,0,0,.3);display:none;z-index:7000;max-width:80vw;white-space:pre-wrap}
 </style>
 </head>
@@ -83,7 +89,7 @@
   </div>
 </div>
 
-<!-- Popup: show code after successful purchase redirect -->
+<!-- Popup: code after Stripe redirect -->
 <div class="pop" id="issuePop" aria-hidden="true">
   <div class="pop-card">
     <div class="h">Your team code</div>
@@ -113,7 +119,7 @@
     function armAdmin(){ try{ localStorage.setItem(ADMIN_ARM_KEY,'1'); }catch(e){} }
     function disarmAdmin(){ try{ localStorage.removeItem(ADMIN_ARM_KEY); }catch(e){} }
 
-    // first-run flag per team
+    // first-run flag per team (only set AFTER we actually play onboarding once)
     function firstRunKey(){ return 'nora_onboarded_' + (getBiz()||''); }
     function isFirstRun(){ try{ return !localStorage.getItem(firstRunKey()); }catch(e){ return true; } }
     function markOnboarded(){ try{ localStorage.setItem(firstRunKey(),'1'); }catch(e){} }
@@ -127,20 +133,26 @@
       var code=m[1]; var pop=document.getElementById('issuePop'); var issuedEl=document.getElementById('issuedCode');
       issuedEl.textContent=code; pop.classList.add('open'); pop.setAttribute('aria-hidden','false');
       document.getElementById('copyIssued').onclick=async function(){ try{ await navigator.clipboard.writeText(code); this.textContent='Copied'; }catch(e){} };
-      document.getElementById('useIssued').onclick=function(){ setBiz(code); updateGate(); markOnboarded(); pop.classList.remove('open'); pop.setAttribute('aria-hidden','true'); history.replaceState(null,'','/'); };
+      document.getElementById('useIssued').onclick=function(){
+        setBiz(code); updateGate();
+        // do NOT markOnboarded here; we want the welcome to play once on first tap
+        pop.classList.remove('open'); pop.setAttribute('aria-hidden','true'); history.replaceState(null,'','/');
+      };
     })();
 
     var teamCodeInput=document.getElementById('teamCode');
     document.getElementById('saveCode').addEventListener('click', function(){
       var v=(teamCodeInput.value||"").trim();
       if(!/^[0-9]{4}-[0-9]{4}$/.test(v)){ showErr("Enter a code like 1234-5678"); return; }
-      setBiz(v); updateGate(); markOnboarded(); // mark so we play onboarding once
+      setBiz(v); updateGate();
+      // do NOT markOnboarded here; we want the welcome to play once on first tap
     });
+
     document.getElementById('buyBtn').addEventListener('click', function(){
       location.href="https://buy.stripe.com/14A14ng1E3Gn4BmceI5sA0b";
     });
 
-    // Long-press mic => code gate (so you can switch teams)
+    // Long-press mic => open gate (switch teams)
     var voiceBtn=document.getElementById('voiceBtn'), pressTimer;
     function startPress(){ clearTimeout(pressTimer); pressTimer=setTimeout(function(){ gate.style.display='flex'; }, 1200); }
     function cancelPress(){ clearTimeout(pressTimer); }
@@ -157,8 +169,9 @@
     openUpload.addEventListener('click', function(){ if(!hasCode()){ updateGate(); return; } uploadModal.classList.add('open'); uploadModal.setAttribute('aria-hidden','false'); renderFileList(); });
     closeUpload.addEventListener('click', function(){ uploadModal.classList.remove('open'); uploadModal.setAttribute('aria-hidden','true'); });
 
-    // Mic session
-    var isSession=false,isListening=false,isProcessing=false,audioCtx,micStream,recorder,chunks=[],inflight,sessionId=null;
+    // ===== Mic session with auto-stop on silence =====
+    var isSession=false,isListening=false,isProcessing=false,audioCtx,micStream,recorder,chunks=[],inflightCtrl=null,sessionId=null;
+    var sourceNode=null, analyser=null, monitorTimer=null, startedAt=0, lastHeardAt=0;
 
     function setState(cls){
       voiceBtn.className='voice-button '+cls;
@@ -179,7 +192,7 @@
       e.preventDefault(); if(!hasCode()){ updateGate(); return; }
       if(!isSession){
         isSession=true; sessionId='sess_'+Date.now();
-        // First run -> onboarding brief; afterwards, normal brief
+        // First tap after joining a team -> onboarding brief (once)
         var wantOnboard = isFirstRun();
         try{
           setState('thinking');
@@ -193,10 +206,10 @@
             await new Promise(function(res){ a.onended=res; });
           }
           if(wantOnboard) markOnboarded();
-        }catch(e){}
+        }catch(e){ showErr(e&&e.stack?e.stack:e); }
         startListening();
       }else{
-        stopListening(); isSession=false; setState('idle');
+        stopListening(true); isSession=false; setState('idle');
       }
     });
 
@@ -209,28 +222,104 @@
       var mime=getPreferredMime(), opts={}; if(mime) opts.mimeType=mime;
       recorder=new MediaRecorder(micStream,opts); chunks=[];
       recorder.ondataavailable=function(e){ if(e.data&&e.data.size>0) chunks.push(e.data); };
-      recorder.onstop=processRecording; recorder.start(120);
+      recorder.onstop=processRecording; recorder.start(200);
+
+      // silence monitor
+      setupMonitor();
     }
-    function stopListening(){ try{ if(recorder&&recorder.state==='recording') recorder.stop(); }catch(e){} try{ if(micStream){ micStream.getTracks().forEach(function(t){ t.stop(); }); } }catch(e){} isListening=false; }
+
+    function setupMonitor(){
+      try{
+        sourceNode = audioCtx.createMediaStreamSource(micStream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 2048;
+        sourceNode.connect(analyser);
+        var data = new Uint8Array(analyser.fftSize);
+        startedAt = performance.now(); lastHeardAt = startedAt;
+        var THRESH = 0.015; // ~1.5% amplitude
+        var MIN_SPEECH_MS = 400;
+        var LINGER_MS = 900;
+        var MAX_MS = 12000;
+
+        function tick(){
+          if(!isListening || !recorder || recorder.state!=='recording'){ clearInterval(monitorTimer); return; }
+          analyser.getByteTimeDomainData(data);
+          // compute normalized RMS-ish
+          var sum=0;
+          for(var i=0;i<data.length;i++){
+            var v=(data[i]-128)/128;
+            sum+=v*v;
+          }
+          var rms=Math.sqrt(sum/data.length);
+          var now=performance.now();
+          if(rms>THRESH){ lastHeardAt=now; }
+          var spokeLongEnough=(now-startedAt)>MIN_SPEECH_MS;
+          var silentLongEnough=(now-lastHeardAt)>LINGER_MS;
+          var hitMax=(now-startedAt)>MAX_MS;
+          if((spokeLongEnough && silentLongEnough) || hitMax){
+            stopListening(false);
+          }
+        }
+        clearInterval(monitorTimer);
+        monitorTimer = setInterval(tick, 120);
+      }catch(e){
+        console.log('monitor setup failed', e);
+      }
+    }
+
+    function stopListening(userStop){
+      try{ if(recorder && recorder.state==='recording') recorder.stop(); }catch(e){}
+      try{ if(micStream){ micStream.getTracks().forEach(function(t){ t.stop(); }); } }catch(e){}
+      isListening=false;
+      // cleanup monitor
+      try{ if(monitorTimer){ clearInterval(monitorTimer); monitorTimer=null; } }catch(e){}
+      try{ if(sourceNode){ sourceNode.disconnect(); sourceNode=null; } }catch(e){}
+      try{ if(analyser){ analyser.disconnect(); analyser=null; } }catch(e){}
+      if(userStop){ setState('idle'); }
+    }
+
     function blobToBase64(blob){ return new Promise(function(res,rej){ var r=new FileReader(); r.onloadend=function(){ try{ var s=String(r.result||''); res(s.split(',')[1]||''); }catch(e){ rej(e);} }; r.onerror=function(){ rej(r.error||new Error('readAsDataURL failed')); }; r.readAsDataURL(blob); }); }
+
     async function processRecording(){
       isListening=false; isProcessing=true; setState('thinking');
       try{
         var blob=new Blob(chunks,{type:(recorder&&recorder.mimeType)?recorder.mimeType:'audio/webm'}); chunks=[];
         if(!blob.size){ isProcessing=false; setState('idle'); return; }
-        var b64=await blobToBase64(blob); if(inflight&&inflight.abort) inflight=new AbortController();
+        var b64=await blobToBase64(blob);
+
+        // proper abort/replace
+        try{ inflightCtrl && inflightCtrl.abort && inflightCtrl.abort(); }catch(e){}
+        inflightCtrl = new AbortController();
+
         var payload={ businessId:getBiz(), sessionId:sessionId, mode:isAdminArmed()?'admin-armed':'normal', audio:{data:b64,mime:blob.type} };
-        var resp=await fetch('/.netlify/functions/voice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+        var resp=await fetch('/.netlify/functions/voice',{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(payload),signal:inflightCtrl.signal
+        });
         var data={}; try{ data=await resp.json(); }catch(e){ data={}; }
-        if(data && data.control){ if(data.control.adminArmed) armAdmin(); if(data.control.adminDisarm) disarmAdmin(); if(data.control.requireCode){ setBiz(""); updateGate(); } }
+
+        if(data && data.control){
+          if(data.control.adminArmed) armAdmin();
+          if(data.control.adminDisarm) disarmAdmin();
+          if(data.control.requireCode){ setBiz(""); updateGate(); }
+        }
         if(data && data.error){ showErr(data.error); }
-        if(data && data.audio){ var a=new Audio(); a.preload="none"; a.playsInline=true; a.src=data.audio; await a.play(); await new Promise(function(r){ a.onended=r; }); setState('idle'); }
-        else setState('idle');
-        isProcessing=false; if(isSession) startListening();
-      }catch(e){ isProcessing=false; setState('error'); showErr(e&&e.stack?e.stack:e); }
+
+        if(data && data.audio){
+          var a=new Audio(); a.preload="none"; a.playsInline=true; a.src=data.audio; await a.play();
+          await new Promise(function(r){ a.onended=r; });
+          setState('idle');
+        } else {
+          setState('idle');
+        }
+        isProcessing=false;
+        if(isSession) startListening(); // continue VAD loop
+      }catch(e){
+        isProcessing=false; setState('error'); showErr(e&&e.stack?e.stack:e);
+      }
     }
 
-    // Uploads (unchanged logic; improved errors already in files.js)
+    // ===== Uploads =====
     fileInput.addEventListener('change', async function(){
       var files=Array.from(fileInput.files||[]); if(!files.length) return;
       for(var i=0;i<files.length;i++){
