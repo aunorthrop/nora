@@ -1,19 +1,8 @@
-// Nora — Voice Assistant (Your prompt via NORA_SYSTEM_PROMPT + ElevenLabs TTS, client TTS fallback)
+// Nora — Purposeful Interruptions + Humor + Growth + Configurable Memory
 // - STT: OpenAI Whisper
-// - Chat: OpenAI (JSON out with tone/turn-taking)
-// - TTS: ElevenLabs only; if unavailable, server returns {clientTTS:true, sayText:"..."}
-// - Memory: tiny consent-first notes
-//
-// ==== REQUIRED ENV ====
-// OPENAI_API_KEY
-// ELEVENLABS_API_KEY
-// ELEVENLABS_VOICE_ID
-//
-// ==== OPTIONAL ENV ====
-// OPENAI_MODEL           (default: gpt-4o-mini)  <-- use a real model name; not "gpt-5-thinking"
-// NORA_SYSTEM_PROMPT     (your long prompt string)
-// OPENAI_TTS_VOICE       (unused here; we don't call OpenAI TTS)
-// DEFAULT_TONE           (neutral|cheerful|empathetic|serious; default neutral)
+// - Chat: OpenAI (STRICT JSON w/ interruption + tone + humor)
+// - TTS: ElevenLabs only; client SpeechSynthesis fallback if TTS fails
+// - Memory: consent-first or always-on (env switch), with optional TTL
 
 const OPENAI_ROOT = "https://api.openai.com/v1";
 
@@ -22,7 +11,7 @@ const CHAT_MODEL = (() => {
   const fallback = "gpt-4o-mini";
   const m = (process.env.OPENAI_MODEL || "").trim();
   if (!m) return fallback;
-  const banned = ["gpt-5-thinking", "gpt5", "thinking", "demo"];
+  const banned = ["gpt-5-thinking","gpt5","thinking","demo"];
   if (banned.includes(m.toLowerCase())) return fallback;
   return m;
 })();
@@ -33,18 +22,23 @@ const STT_MODEL = "whisper-1";
 const ELEVEN_API_KEY  = process.env.ELEVENLABS_API_KEY || "";
 const ELEVEN_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "";
 
-// ---- Defaults / behavior ----
-const DEFAULT_SPEED = 0.95;
+// ---- Behavior + Memory ----
 const DEFAULT_TONE  = (process.env.DEFAULT_TONE || "neutral").toLowerCase(); // neutral|cheerful|empathetic|serious
-const MAX_TURNS = 30;
-const MAX_MEMORY_ITEMS = 2000;
+const DEFAULT_SPEED = 0.95;
+const MEMORY_MODE   = (process.env.NORA_MEMORY_MODE || "consent").toLowerCase(); // 'consent' | 'always'
+const TTL_DAYS_ENV  = process.env.NORA_MEMORY_TTL_DAYS;
+const MEMORY_TTL_MS = TTL_DAYS_ENV ? Math.max(1, parseInt(TTL_DAYS_ENV,10)) * 24*60*60*1000
+                                   : (MEMORY_MODE === "always" ? null : 30*24*60*60*1000); // default: 30d in consent mode
 
-// ---- In-memory state (per lambda instance) ----
+const MAX_TURNS = 30;
+const MAX_MEMORY_ITEMS = 4000;
+
+// ---- State (per lambda instance) ----
 const memoryStore = new Map();
 const brainVectors = new Map();
 const deviceBrain = new Map();
 
-// ---- Utilities ----
+// ---- Utils ----
 const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
 const safeJson = (s)=>{ try{return JSON.parse(s);}catch{return null;} };
 const ext = (m)=>!m?".wav": m.includes("wav")?".wav": m.includes("mp3")?".mp3": m.includes("mp4")?".mp4": m.includes("webm")?".webm": m.includes("ogg")?".ogg":".wav";
@@ -81,38 +75,56 @@ function isDuplicate(items,newText){
   });
 }
 function scoreItems(items,query){
-  const q = new Set(tokenize(query));
-  const now=Date.now();
+  const q = new Set(tokenize(query)); const now=Date.now();
   return items.map(it=>{
     const w = brainVectors.get(it.id) || new Set(tokenize(it.text));
     let overlap=0; for(const t of q) if(w.has(t)) overlap++;
     const recency = 1 / Math.max(1, (now - (it.updatedAt||it.createdAt)) / (1000*60*60*24));
     const confidence = it.confidence || 0.5;
-    const typeBoost = it.type==="contact"?0.3 : it.type==="note"?0.1 : 0;
+    const typeBoost = it.type==="profile"?0.35 : it.type==="preference"?0.25 : it.type==="note"?0.1 : 0;
     return { ...it, _score: overlap + recency*0.2 + confidence*0.4 + typeBoost };
   }).sort((a,b)=>b._score-a._score);
 }
 
-// ---- System prompt wiring ----
+// ---- System Prompt ----
 function buildSystemPrompt(){
   const userPrompt = (process.env.NORA_SYSTEM_PROMPT || "").trim();
   const base = userPrompt || `
-You are Nora, a voice-first assistant. Be clear, short (2–4 sentences), practical, friendly.
-Never give medical, legal, or financial advice; refuse briefly and suggest safe next steps.
-Use consent-first memory: only save notes if the user asks to "remember", "save", or "note".
-When you used a source or you are uncertain, be transparent in one short clause.`;
+You are Nora, a voice-first assistant. You are clear, genuinely curious, lightly humorous (never snarky), and helpful.
+You keep answers short (2–4 sentences). Start with the gist. No medical, legal, or financial advice—refuse briefly and propose safe next steps.
+You interrupt with purpose only when needed: (1) intent is unclear, (2) info is missing to complete a task, (3) a safety concern or contradiction appears, (4) the user seems off-track from their stated goal.
+When you interrupt, do it kindly: one crisp question or fix, then wait.
 
-  // We append a strict JSON contract so your app can drive tone/turn-taking/TTS reliably.
+MEMORY
+- If mode is "consent": store only when the user says remember/save/note or when save_note is provided.
+- If mode is "always": extract helpful facts (preferences, names, birthdays, “call me…”, recurring plans) from natural talk and store them.
+- Summarize recall in ≤3 bullets when asked.
+
+HUMOR
+- Use light, situational humor when humor_level > 0.4. One quick line max. Never punch down.
+
+RECENCY
+- If time-sensitive or uncertain, admit it and ask a tiny clarifier before proceeding, or provide a safe partial answer.
+
+DIFFERENTIATORS
+- Mirror → Counter → Synthesis in opinionated topics (short, constructive).
+- Audible receipts: if you used an external source or are uncertain, set a short receipt like "Source: manufacturer site, today."
+`;
+
   const contract = `
-Return STRICT JSON ONLY:
+Return STRICT JSON ONLY with this exact shape:
 {
   "say": string,                          // 2–4 short sentences to speak
   "tone": "neutral"|"cheerful"|"empathetic"|"serious",
-  "can_interrupt": boolean,               // allow barge-in without losing coherence
-  "max_speak_ms": number,                 // cap TTS playback, e.g., 6500
-  "confidence": number,                   // 0.0 – 1.0 self-estimate
-  "receipt": string|null,                 // tiny audible source tag or null
-  "save_note": string|null                // note text to store or null
+  "can_interrupt": boolean,               // allow user barge-in without losing coherence
+  "max_speak_ms": number,                 // e.g., 6500
+  "confidence": number,                   // 0.0–1.0
+  "receipt": string|null,                 // tiny audible source tag
+  "save_note": string|null,               // text to store or null
+  "interrupt_now": boolean,               // true if Nora should interject before a full answer
+  "interrupt_reason": "unclear_intent"|"missing_info"|"safety"|"off_track"|null,
+  "follow_up": string|null,               // the one short clarifying question or correction
+  "humor_level": number                   // 0.0–1.0; >0.4 enables a gentle quip
 }
 Self-check: inside scope? concise? valid JSON only.`;
 
@@ -141,30 +153,50 @@ exports.handler = async (event)=>{
     try{
       transcript = await withRetry(()=>transcribe(audio.data, audio.mime), 2);
     }catch(e){
-      return speakOrText(200, sid, brain, "Sorry—I couldn’t catch that. Try a little closer to the mic.", null, true);
+      return speakOrText(200, sid, brain, "Sorry—I couldn’t catch that. Try a little closer to the mic.", {tone:DEFAULT_TONE,max_speak_ms:4500,can_interrupt:true}, true);
     }
     if(!(transcript||"").trim()){
-      return speakOrText(200, sid, brain, "I heard audio but not the words. Could you repeat that?", null, true);
+      return speakOrText(200, sid, brain, "I heard audio but not the words. Could you repeat that?", {tone:DEFAULT_TONE,max_speak_ms:4500,can_interrupt:true}, true);
     }
     logTurn(businessId, sid, transcript, "user");
 
-    // 2) Quick intents (notes)
+    // 2) Memory mode: opportunistic extraction for ALWAYS
+    if (MEMORY_MODE === "always") autoExtractProfile(businessId, transcript);
+
+    // 3) Quick intents (explicit notes / forget)
     const fast = routeIntent(businessId, transcript);
     if(fast){
       logTurn(businessId, sid, fast.say, "assistant");
       return await speakOrText(200, sid, brain, fast.say, { tone: DEFAULT_TONE, max_speak_ms:6500, can_interrupt:true }, false);
     }
 
-    // 3) Chat (JSON out)
+    // 4) Chat (JSON out)
     const out = await chatJSONWithMemory(sid, businessId, transcript)
-      .catch(()=>({ say:"I hit a snag. Mind asking that again?", tone: DEFAULT_TONE, can_interrupt:true, max_speak_ms:6500, confidence:0.6, receipt:null, save_note:null }));
+      .catch(()=>({
+        say:"I hit a snag. Mind asking that again?",
+        tone: DEFAULT_TONE, can_interrupt:true, max_speak_ms:4500,
+        confidence:0.6, receipt:null, interrupt_now:false, interrupt_reason:null, follow_up:null, humor_level:0.0, save_note:null
+      }));
 
     if (out.save_note) addNoteToMemory(businessId, out.save_note);
 
-    logTurn(businessId, sid, out.say, "assistant");
+    // If purposeful interruption is requested, speak only the follow_up (short) now
+    let sayNow = out.say;
+    if (out.interrupt_now && out.follow_up){
+      sayNow = out.follow_up;
+    } else {
+      // Optionally append tiny receipt
+      if (out.receipt && out.receipt.trim()){
+        sayNow = `${sayNow.trim()}  ${out.receipt.trim()}`;
+      }
+      // Gentle humor if asked for
+      if (Number(out.humor_level||0) > 0.4){
+        sayNow = injectTinyHumor(sayNow);
+      }
+    }
 
-    // 4) TTS (ElevenLabs) or client fallback
-    return await speakOrText(200, sid, brain, out.say, out, false);
+    logTurn(businessId, sid, sayNow, "assistant");
+    return await speakOrText(200, sid, brain, sayNow, out, false);
 
   }catch(err){
     console.error("Handler error:", err);
@@ -180,7 +212,7 @@ async function transcribe(b64, mime){
   fd.set("model", STT_MODEL);
   fd.set("language","en");
   fd.set("temperature","0.2");
-  fd.set("prompt","Casual assistant conversation. The user may pause.");
+  fd.set("prompt","Conversational voice; user may pause or self-correct.");
   const blob = new Blob([buf],{ type:mime||"application/octet-stream" });
   fd.set("file", blob, "audio"+ext(mime));
 
@@ -194,7 +226,7 @@ async function transcribe(b64, mime){
   return (j.text||"").trim();
 }
 
-// ---- Intents (remember/forget) ----
+// ---- Intents (notes/forget) ----
 function routeIntent(businessId, text){
   const lower = String(text||"").toLowerCase().trim();
   if (/^(remember|note|save)\s+/.test(lower)){
@@ -204,155 +236,61 @@ function routeIntent(businessId, text){
   }
   if (/^forget\s+last\s+note/.test(lower)){
     const b = ensureBrain(businessId);
-    const lastIdx = [...b.items].reverse().findIndex(i=>i.type==="note");
-    if (lastIdx >= 0) b.items.splice(b.items.length-1-lastIdx, 1);
+    const last = [...b.items].reverse().find(i=>i.type==="note");
+    if (last){ b.items = b.items.filter(i=>i.id!==last.id); }
     return { say: "Okay, removed the last note." };
   }
   return null;
 }
 
-function addNoteToMemory(businessId, text){
+// ---- Memory helpers ----
+function addNoteToMemory(businessId, text, kind="note", extra={}){
   const b = ensureBrain(businessId);
-  const item = makeItem("note", text, { tags: ["note"], confidence: 1.0, expiresAt: Date.now() + 30*24*60*60*1000 }); // 30-day TTL
+  const item = makeItem(kind, text, {
+    tags: [kind],
+    confidence: 1.0,
+    expiresAt: MEMORY_TTL_MS ? (Date.now() + MEMORY_TTL_MS) : null,
+    ...extra
+  });
   if(!isDuplicate(b.items, item.text)){ b.items.push(item); indexItem(item); pruneMemoryItems(b); }
 }
 
-// ---- Chat (JSON contract) ----
-async function chatJSONWithMemory(sessionId, businessId, userText){
-  const hist = memoryStore.get(sessionId) || [];
-  hist.push({ role:"user", content:userText, ts:Date.now() });
-  const trimmed = hist.slice(-MAX_TURNS*2);
-  memoryStore.set(sessionId, trimmed);
-
-  const brain = ensureBrain(businessId);
-  const saved = brain.items.slice(-20).map(i=>{
-    if(i.type==="note") return `- Note: ${i.text.slice(0,180)}`;
-    return `- ${i.type}: ${i.text.slice(0,180)}`;
-  }).join("\n") || "No saved info yet.";
-
-  const relevant = scoreItems(brain.items, userText).slice(0,6);
-  const relevantBlock = relevant.length ? ("\nRelevant:\n" + relevant.map(i=>`- ${i.text.slice(0,200)}`).join("\n")) : "";
-
-  const system = {
-    role:"system",
-    content: buildSystemPrompt() + `
-
-Saved info:
-${saved}
-${relevantBlock}`
-  };
-
-  const messages = [system, ...trimmed.map(m=>({ role:m.role, content:m.content }))];
-
-  const order = [CHAT_MODEL, ...CHAT_FALLBACKS.filter(m=>m!==CHAT_MODEL)];
-  let lastErr;
-  for(const model of order){
-    try{
-      const res = await fetch(`${OPENAI_ROOT}/chat/completions`,{
-        method:"POST",
-        headers:{ "Authorization":`Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type":"application/json" },
-        body: JSON.stringify({
-          model, temperature:0.35, max_tokens:260,
-          response_format:{ type:"json_object" },
-          messages
-        })
-      });
-      if(!res.ok){ lastErr = new Error(`Chat ${model} ${res.status}: ${await res.text()}`); continue; }
-      const json = await res.json();
-      const raw = json.choices?.[0]?.message?.content || "{}";
-      const out = safeJson(raw) || {};
-      const say = String(out.say || "").trim() || "I’m here.";
-      const tone = (out.tone || DEFAULT_TONE).toLowerCase();
-      const can_interrupt = !!out.can_interrupt;
-      const max_speak_ms = Math.max(2500, Math.min(12000, Number(out.max_speak_ms || 6500)));
-      const confidence = Math.max(0, Math.min(1, Number(out.confidence || 0.6)));
-      const receipt = out.receipt || null;
-      const save_note = out.save_note || null;
-
-      trimmed.push({ role:"assistant", content:say, ts:Date.now() });
-      memoryStore.set(sessionId, trimmed); pruneMap(memoryStore, 50);
-
-      return { say, tone, can_interrupt, max_speak_ms, confidence, receipt, save_note };
-    }catch(e){ lastErr = e; }
-  }
-  throw lastErr || new Error("All chat models failed");
+function injectTinyHumor(say){
+  // One tiny, context-agnostic quip at the end. Keep it gentle.
+  const quips = [
+    "Promise I won’t make it a TED Talk.",
+    "Short, like good coffee shots.",
+    "I’ll keep the nerdiness under control. Mostly."
+  ];
+  const pick = quips[Math.floor(Math.random()*quips.length)];
+  // Respect length—don’t explode past ~4 sentences.
+  return say.split(/\s+/).length > 60 ? say : `${say}  ${pick}`;
 }
 
-// ---- TTS (ElevenLabs) or client fallback ----
-async function speakOrText(statusCode, sid, brain, say, meta, softFallback){
-  // Try ElevenLabs first if configured
-  const wantEleven = ELEVEN_API_KEY && ELEVEN_VOICE_ID;
-  if (wantEleven){
-    try{
-      const styleMap = { neutral:0.15, cheerful:0.4, empathetic:0.35, serious:0.2 };
-      const style = styleMap[(meta?.tone||DEFAULT_TONE)] ?? 0.2;
+function autoExtractProfile(businessId, text){
+  const t = " " + String(text||"") + " ";
+  // Names / “call me …”
+  const callMe = t.match(/\bcall me ([A-Za-z][\w'-]{1,30})/i);
+  if (callMe) addNoteToMemory(businessId, `Preferred name: ${callMe[1]}`, "profile", { key:"preferred_name", value: callMe[1] });
 
-      const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE_ID}`,{
-        method:"POST",
-        headers:{ "xi-api-key":ELEVEN_API_KEY, "Content-Type":"application/json", "Accept":"audio/mpeg" },
-        body: JSON.stringify({
-          text: polish(say),
-          model_id: "eleven_multilingual_v2",
-          voice_settings: { stability:0.7, similarity_boost:0.8, style, use_speaker_boost:true },
-          output_format: "mp3_44100_128"
-        })
-      });
-      if(!res.ok){ throw new Error(`ElevenLabs ${res.status}: ${await res.text().catch(()=>"(no body)")}`); }
-      const buf = Buffer.from(await res.arrayBuffer());
-      if (buf.length < 1000) throw new Error("ElevenLabs tiny buffer");
+  // Birthday
+  const bd = t.match(/\b(?:birthday|bday|born on)\s+(?:is\s+)?([A-Za-z]{3,9}\s+\d{1,2}(?:,\s*\d{4})?|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)/i);
+  if (bd) addNoteToMemory(businessId, `Birthday: ${bd[1]}`, "profile", { key:"birthday", value: bd[1] });
 
-      return reply(statusCode, {
-        sessionId: sid,
-        transcript: undefined,
-        response: say,
-        tone: meta?.tone || DEFAULT_TONE,
-        audio: `data:audio/mpeg;base64,${buf.toString("base64")}`,
-        ttsEngine: "elevenlabs",
-        canInterrupt: !!meta?.can_interrupt,
-        maxSpeakMs: Number(meta?.max_speak_ms || 6500),
-        receipt: meta?.receipt || null,
-        memoryShadow: brainSnapshot(brain)
-      }, hdrs);
-    }catch(e){
-      // fall through to client TTS
-      console.warn("ElevenLabs failed; falling back to client TTS:", e.message);
-    }
-  }
+  // Likes / dislikes
+  const like = t.match(/\b(i (really )?like|my favorite is)\s+([^.,;!?]{2,60})/i);
+  if (like) addNoteToMemory(businessId, `Likes: ${like[3].trim()}`, "preference", { key:"likes", value: like[3].trim() });
 
-  // Client TTS fallback (no server audio)
-  return reply(statusCode, {
-    sessionId: sid,
-    response: say,
-    ttsEngine: "client-speechSynthesis",
-    clientTTS: true,
-    sayText: say,
-    tone: meta?.tone || DEFAULT_TONE,
-    canInterrupt: !!meta?.can_interrupt,
-    maxSpeakMs: Number(meta?.max_speak_ms || 6500),
-    receipt: meta?.receipt || null,
-    memoryShadow: brainSnapshot(brain)
-  }, hdrs);
+  const dislike = t.match(/\b(i (really )?dislike|i hate)\s+([^.,;!?]{2,60})/i);
+  if (dislike) addNoteToMemory(businessId, `Dislikes: ${dislike[3].trim()}`, "preference", { key:"dislikes", value: dislike[3].trim() });
 }
 
-function polish(text){
-  let t = String(text||"").trim();
-  t = t.replace(/([.!?])\s+/g,"$1  ").replace(/,\s+/g,",  ").replace(/\s{3,}/g,"  ");
-  if(!/[.!?…]$/.test(t)) t+=".";
-  return t.slice(0,3600);
-}
-
-// ---- Memory helpers ----
 function logTurn(businessId, sessionId, content, role){
   const brain = ensureBrain(businessId);
   if(!brain.conversations) brain.conversations=[];
   brain.conversations.push({ id:uid(), sessionId, role, content, timestamp:Date.now() });
-  if(brain.conversations.length>1000) brain.conversations = brain.conversations.slice(-1000);
-  if(role==="user") autoExtract(businessId, content);
-}
-
-function autoExtract(businessId, text){
-  const m = String(text||"").match(/\b(?:remember|note)\s+([^.,;!?]+)[.,;!?]?/i);
-  if(m){ addNoteToMemory(businessId, m[1].trim()); }
+  if(brain.conversations.length>1500) brain.conversations = brain.conversations.slice(-1500);
+  if(role==="user" && MEMORY_MODE==="always") autoExtractProfile(businessId, content);
 }
 
 function pruneMemoryItems(brain){
@@ -361,7 +299,8 @@ function pruneMemoryItems(brain){
     let score = item.confidence||0.5;
     const age = Date.now() - (item.updatedAt||item.createdAt);
     const days = age/(1000*60*60*24);
-    if(item.type==="contact") score+=0.3;
+    if(item.type==="profile") score+=0.4;
+    if(item.type==="preference") score+=0.2;
     if(item.type==="note") score+=0.1;
     score += Math.max(0, 0.1 - (days*0.001));
     return { ...item, _pruneScore:score };
@@ -396,7 +335,131 @@ function mergeShadow(businessId, shadow){
 }
 
 function brainSnapshot(brain){
-  return { items: brain.items, conversations: brain.conversations||[], pace: brain.speed };
+  return { items: brain.items, conversations: brain.conversations||[], pace: brain.speed, memoryMode: MEMORY_MODE };
+}
+
+// ---- Chat (JSON) ----
+async function chatJSONWithMemory(sessionId, businessId, userText){
+  const hist = memoryStore.get(sessionId) || [];
+  hist.push({ role:"user", content:userText, ts:Date.now() });
+  const trimmed = hist.slice(-MAX_TURNS*2);
+  memoryStore.set(sessionId, trimmed);
+
+  const brain = ensureBrain(businessId);
+  const saved = brain.items.slice(-25).map(i=>{
+    if(i.type==="profile" || i.type==="preference") return `- ${i.type}: ${i.text}`;
+    if(i.type==="note") return `- Note: ${i.text.slice(0,200)}`;
+    return `- ${i.type}: ${i.text.slice(0,200)}`;
+  }).join("\n") || "No saved info yet.";
+
+  const relevant = scoreItems(brain.items, userText).slice(0,8);
+  const relevantBlock = relevant.length ? ("\nRelevant:\n" + relevant.map(i=>`- ${i.text.slice(0,220)}`).join("\n")) : "";
+
+  const sys = { role:"system", content: buildSystemPrompt() + `
+
+Memory mode: ${MEMORY_MODE.toUpperCase()}
+Saved info:
+${saved}
+${relevantBlock}` };
+
+  const messages = [sys, ...trimmed.map(m=>({ role:m.role, content:m.content }))];
+
+  const order = [CHAT_MODEL, ...CHAT_FALLBACKS.filter(m=>m!==CHAT_MODEL)];
+  let lastErr;
+  for(const model of order){
+    try{
+      const res = await fetch(`${OPENAI_ROOT}/chat/completions`,{
+        method:"POST",
+        headers:{ "Authorization":`Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type":"application/json" },
+        body: JSON.stringify({
+          model, temperature:0.35, max_tokens:320,
+          response_format:{ type:"json_object" },
+          messages
+        })
+      });
+      if(!res.ok){ lastErr = new Error(`Chat ${model} ${res.status}: ${await res.text()}`); continue; }
+      const json = await res.json();
+      const raw = json.choices?.[0]?.message?.content || "{}";
+      const out = safeJson(raw) || {};
+      // normalize
+      return {
+        say: String(out.say || "I’m here.").trim(),
+        tone: (out.tone || DEFAULT_TONE).toLowerCase(),
+        can_interrupt: !!out.can_interrupt,
+        max_speak_ms: Math.max(2500, Math.min(12000, Number(out.max_speak_ms || 6500))),
+        confidence: Math.max(0, Math.min(1, Number(out.confidence || 0.6))),
+        receipt: out.receipt || null,
+        save_note: out.save_note || null,
+        interrupt_now: !!out.interrupt_now,
+        interrupt_reason: out.interrupt_reason || null,
+        follow_up: out.follow_up || null,
+        humor_level: Math.max(0, Math.min(1, Number(out.humor_level || 0)))
+      };
+    }catch(e){ lastErr = e; }
+  }
+  throw lastErr || new Error("All chat models failed");
+}
+
+// ---- TTS (ElevenLabs) or client fallback ----
+async function speakOrText(statusCode, sid, brain, say, meta, softFallback){
+  const wantEleven = ELEVEN_API_KEY && ELEVEN_VOICE_ID;
+  if (wantEleven){
+    try{
+      const styleMap = { neutral:0.15, cheerful:0.4, empathetic:0.35, serious:0.2 };
+      const style = styleMap[(meta?.tone||DEFAULT_TONE)] ?? 0.2;
+      const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE_ID}`,{
+        method:"POST",
+        headers:{ "xi-api-key":ELEVEN_API_KEY, "Content-Type":"application/json", "Accept":"audio/mpeg" },
+        body: JSON.stringify({
+          text: polish(say),
+          model_id: "eleven_multilingual_v2",
+          voice_settings: { stability:0.7, similarity_boost:0.8, style, use_speaker_boost:true },
+          output_format: "mp3_44100_128"
+        })
+      });
+      if(!res.ok){ throw new Error(`ElevenLabs ${res.status}: ${await res.text().catch(()=>"(no body)")}`); }
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length < 1000) throw new Error("ElevenLabs tiny buffer");
+
+      return reply(statusCode, {
+        sessionId: sid,
+        response: say,
+        tone: meta?.tone || DEFAULT_TONE,
+        audio: `data:audio/mpeg;base64,${buf.toString("base64")}`,
+        ttsEngine: "elevenlabs",
+        canInterrupt: !!meta?.can_interrupt,
+        maxSpeakMs: Number(meta?.max_speak_ms || 6500),
+        receipt: meta?.receipt || null,
+        interruptReason: meta?.interrupt_reason || null,
+        clientTTS: false,
+        memoryShadow: brainSnapshot(brain)
+      }, hdrs);
+    }catch(e){
+      console.warn("ElevenLabs failed; falling back to client TTS:", e.message);
+    }
+  }
+
+  // Client SpeechSynthesis fallback (no audio payload)
+  return reply(statusCode, {
+    sessionId: sid,
+    response: say,
+    sayText: say,
+    ttsEngine: "client-speechSynthesis",
+    clientTTS: true,
+    tone: meta?.tone || DEFAULT_TONE,
+    canInterrupt: !!meta?.can_interrupt,
+    maxSpeakMs: Number(meta?.max_speak_ms || 6500),
+    receipt: meta?.receipt || null,
+    interruptReason: meta?.interrupt_reason || null,
+    memoryShadow: brainSnapshot(brain)
+  }, hdrs);
+}
+
+function polish(text){
+  let t = String(text||"").trim();
+  t = t.replace(/([.!?])\s+/g,"$1  ").replace(/,\s+/g,",  ").replace(/\s{3,}/g,"  ");
+  if(!/[.!?…]$/.test(t)) t+=".";
+  return t.slice(0,3600);
 }
 
 // ---- Retry ----
