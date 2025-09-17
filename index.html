@@ -16,7 +16,6 @@
     font-family:ui-sans-serif,system-ui,-apple-system,"Inter",Segoe UI,Roboto,Arial;
     -webkit-user-select:none;user-select:none;touch-action:manipulation
   }
-  /* one button */
   .mic{
     width:180px;height:180px;border-radius:24px;border:none;background:#1f2330;
     box-shadow:0 10px 40px #0006, inset 0 -2px 0 #000a;
@@ -31,7 +30,6 @@
   .thinking{background:var(--think)}
   .error{background:var(--err)}
 
-  /* gate overlay */
   .gate{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#0009;z-index:40}
   .gate.visible{display:flex}
   .card{width:min(92vw,560px);background:#141824;border:1px solid #202334;border-radius:16px;padding:18px}
@@ -65,36 +63,29 @@
 
 <script>
 (()=> {
-  // DOM
   const mic = document.getElementById('mic');
   const gate = document.getElementById('gate');
   const codeIn = document.getElementById('teamCode');
   const enterBtn = document.getElementById('enterBtn');
 
-  // Endpoints
   const API='/.netlify/functions/voice';
 
-  // Storage keys
   const LS_CODE='nora_team_code';
   const LS_ROLE='nora_role';
   const LS_INTRO='nora_intro_done_';
 
-  // Audio objects
   const speaker=new Audio(); speaker.preload='none'; speaker.playsInline=true;
 
-  // State
   let audioCtx, primed=false, micPrimed=false;
   let isOn=false, isSpeaking=false, loopRunning=false;
   let media=null, rec=null, chunks=[];
 
-  // Helpers
   function setState(s){ mic.className='mic '+s; }
   function toast(m){ const t=document.createElement('div'); t.className='toast'; t.textContent=m; document.body.appendChild(t); setTimeout(()=>{t.remove();},2400); }
   function showGate(){ gate.classList.add('visible'); }
   function hideGate(){ gate.classList.remove('visible'); }
   function normCode(s){ const t=String(s||'').replace(/[^0-9]/g,'').slice(0,8); return t.length===8? t.slice(0,4)+'-'+t.slice(4):''; }
 
-  // Gate init
   if(localStorage.getItem(LS_CODE)) hideGate(); else showGate();
   enterBtn.onclick = ()=>{
     const c=normCode(codeIn.value)||codeIn.value.trim();
@@ -104,12 +95,10 @@
     hideGate();
   };
 
-  // Audio boot
   async function ensureAudio(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state!=='running') await audioCtx.resume(); }
   async function primeOnce(){
     if(primed) return;
     await ensureAudio();
-    // unlock iOS autoplay (WebAudio + HTMLAudio)
     const b=audioCtx.createBuffer(1,1,audioCtx.sampleRate);
     const s=audioCtx.createBufferSource(); s.buffer=b; s.connect(audioCtx.destination); s.start(0);
     try{ speaker.src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="; await speaker.play(); speaker.pause(); speaker.currentTime=0; }catch{}
@@ -122,18 +111,16 @@
     micPrimed=true;
   }
 
-  // Player
   async function playDataUrl(u){
     isSpeaking=true; setState('speaking');
     try{
       speaker.pause(); speaker.currentTime=0; speaker.src=u;
       await speaker.play();
       await new Promise(res=>{ speaker.onended=res; speaker.onpause=res; });
-    }catch(e){ /* if this fails, it's a real audio block */ }
+    }catch(e){ /* swallow */ }
     isSpeaking=false; setState(isOn?'listening':'idle');
   }
 
-  // Recorder
   function pickMime(){ const M=window.MediaRecorder; if(!M||!M.isTypeSupported) return ""; const pref=["audio/mp4;codecs=mp4a.40.2","audio/m4a","audio/webm;codecs=opus","audio/webm","audio/mpeg","audio/wav"]; for(const m of pref) if(M.isTypeSupported(m)) return m; return ""; }
   async function startRecorder(){
     const mime=pickMime();
@@ -143,24 +130,37 @@
     rec.start(150); return rec;
   }
   function stopRecorder(){ try{rec?.stop();}catch{} try{media?.getTracks().forEach(t=>t.stop());}catch{} rec=null; media=null; }
+
+  // LOWERED thresholds so short phrases (like “remember this”) are captured
   function waitUtterance(r){
+    const MIN_BYTES = 400;      // was 1400 — accept short utterances
+    const LINGER_MS = 900;      // slightly quicker end detect
     return new Promise(resolve=>{
       let start=performance.now(), last=start, heard=false;
       const iv=setInterval(()=>{
         const now=performance.now();
         if(chunks.length){ heard=true; last=now; }
-        if(heard && now-last>1100){
+        if(heard && now-last>LINGER_MS){
           clearInterval(iv); try{r.stop();}catch{} setTimeout(()=>{
-            const b=new Blob(chunks,{type:r.mimeType||'audio/webm'}); chunks=[]; resolve(b.size>1400?b:null);
-          },140);
+            const b=new Blob(chunks,{type:r.mimeType||'audio/webm'}); chunks=[];
+            resolve(b.size>MIN_BYTES?b:null);
+          },120);
         }
         if(now-start>14000){ clearInterval(iv); try{r.stop();}catch{} resolve(null); }
-      },120);
+      },110);
     });
   }
   async function blobToB64(b){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onloadend=()=>res(String(fr.result).split(',')[1]); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(b); }); }
 
-  // Listen loop (single instance)
+  // If the main turn fails, still try to get a short server TTS ack so it’s never silent
+  async function serverAck(text){
+    try{
+      const code=localStorage.getItem(LS_CODE)||'';
+      const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code, say:text})});
+      const j=await r.json(); if(j.audio) await playDataUrl(j.audio);
+    }catch{/* ignore */}
+  }
+
   async function loop(){
     if(loopRunning) return; loopRunning=true;
     while(isOn){
@@ -173,7 +173,6 @@
         if(!isOn) break;
         if(!heard) continue;
 
-        // send to server
         const code=localStorage.getItem(LS_CODE)||'';
         const role=localStorage.getItem(LS_ROLE)||'employee';
         const b64=await blobToB64(heard);
@@ -185,27 +184,31 @@
         if(data.control?.role){ localStorage.setItem(LS_ROLE, data.control.role); }
 
         if(data.audio) await playDataUrl(data.audio);
-        else if(data.response) { /* server gave text but no audio: request TTS-only */
+        else if(data.response){
           const r2=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code, say:data.response})});
           const j2=await r2.json(); if(j2.audio) await playDataUrl(j2.audio); else setState('listening');
-        } else setState('listening');
+        } else {
+          // last ditch: ask server to speak an acknowledgement so we don’t go silent
+          await serverAck("I heard you.");
+          setState('listening');
+        }
       }catch(e){
-        setState('error'); toast(String(e.message||'error')); await new Promise(r=>setTimeout(r,240)); setState(isOn?'listening':'idle');
+        await serverAck("I heard you, but ran into an error.");
+        setState('error'); setTimeout(()=>setState(isOn?'listening':'idle'),240);
       }
     }
     loopRunning=false;
   }
 
-  // Toggle
   mic.addEventListener('click', async ()=>{
     if(!localStorage.getItem(LS_CODE)){ showGate(); return; }
-    if(isSpeaking){ try{speaker.pause();}catch{} return; } // interrupt only
+    if(isSpeaking){ try{speaker.pause();}catch{} return; }
     if(!isOn){
       isOn=true; mic.setAttribute('aria-pressed','true');
       try{ await primeOnce(); await askMicPermissionOnce(); }
       catch(e){ isOn=false; mic.setAttribute('aria-pressed','false'); setState('error'); toast('Microphone permission is required'); return; }
 
-      // Intro (server TTS first; if server returns text-only, request TTS immediately)
+      // Intro (server TTS)
       const code=localStorage.getItem(LS_CODE);
       const introKey=LS_INTRO+code;
       setState('thinking');
@@ -213,11 +216,7 @@
         const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,intro:true})}).catch(()=>null);
         const j= r? await r.json().catch(()=>({})) : {};
         if(j.audio) await playDataUrl(j.audio);
-        else if(j.response){
-          const r2=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code, say:j.response})});
-          const j2=await r2.json().catch(()=>({}));
-          if(j2.audio) await playDataUrl(j2.audio);
-        }
+        else if(j.response){ await serverAck(j.response); }
         localStorage.setItem(introKey,'1');
       }
       setState('listening');
