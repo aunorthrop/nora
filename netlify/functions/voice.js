@@ -70,8 +70,8 @@ exports.handler = async (event) => {
       return ok({ audio, response: text });
     }
 
-    // Check if returning user needs updates
-    if (body.checkForUpdates) {
+    // Check if returning user needs updates - FIXED the key name
+    if (body.checkUpdates) {
       const recentUpdates = state.updates.slice(-5);
       if (recentUpdates.length > 0) {
         const updateText = `Welcome back! Here are your latest updates: ${recentUpdates.map(u => u.text).join('. ')}. What would you like to know?`;
@@ -89,13 +89,29 @@ exports.handler = async (event) => {
     const role = String(body.role || "employee");
     
     if (!audioIn?.data || !audioIn?.mime) {
-      return ok({ audio: null, response: "I'm listening—try again." });
+      const fallbackText = "I'm listening—try again.";
+      const audio = await tts(fallbackText);
+      return ok({ audio, response: fallbackText });
     }
 
-    const userText = (await stt(audioIn.data, audioIn.mime)).trim();
-    if (!userText) {
-      return ok({ audio: null, response: "I couldn't hear that clearly—try again." });
+    // Enhanced STT with better error handling
+    let userText;
+    try {
+      userText = (await stt(audioIn.data, audioIn.mime)).trim();
+    } catch (e) {
+      console.error("STT Error:", e);
+      const errorText = "I had trouble hearing you. Could you try again?";
+      const audio = await tts(errorText);
+      return ok({ audio, response: errorText });
     }
+    
+    if (!userText) {
+      const noTextText = "I couldn't hear that clearly—try again.";
+      const audio = await tts(noTextText);
+      return ok({ audio, response: noTextText });
+    }
+
+    console.log("User said:", userText); // Debug logging
 
     const lower = userText.toLowerCase();
 
@@ -198,6 +214,7 @@ exports.handler = async (event) => {
       "- Keep responses concise (1-3 sentences) since this is voice-only",
       "- Never make up policies or information that wasn't provided",
       "- If someone asks for admin functions but isn't admin, guide them politely",
+      "- Always acknowledge what the user said and provide a helpful response",
       "Voice style: Natural, friendly, efficient. Avoid corporate jargon."
     ].join(" ");
 
@@ -209,28 +226,55 @@ exports.handler = async (event) => {
       userText
     ].join("\n");
 
-    const reply = await chat(systemPrompt, contextPrompt);
-    return sayTTS(reply || "I don't have that information yet. You might want to ask your admin to add it.");
+    console.log("Sending to chat:", { systemPrompt, contextPrompt }); // Debug logging
+
+    let reply;
+    try {
+      reply = await chat(systemPrompt, contextPrompt);
+    } catch (e) {
+      console.error("Chat API Error:", e);
+      reply = "I'm having trouble processing that right now. Could you try asking again?";
+    }
+
+    const finalReply = reply || "I don't have that information yet. You might want to ask your admin to add it.";
+    console.log("Nora response:", finalReply); // Debug logging
+    
+    return sayTTS(finalReply);
 
   } catch (e) {
     console.error("Nora error:", e);
-    return err(500, { error: "server_error" });
+    const errorText = "I'm having technical difficulties. Please try again in a moment.";
+    try {
+      const audio = await tts(errorText);
+      return ok({ audio, response: errorText });
+    } catch (ttsErr) {
+      return err(500, { error: "server_error", message: errorText });
+    }
   }
 };
 
 // Helper functions
 async function sayTTS(text) {
-  return { audio: await tts(text), response: text };
+  try {
+    return { audio: await tts(text), response: text };
+  } catch (e) {
+    console.error("TTS Error:", e);
+    return { audio: null, response: text };
+  }
 }
 
 async function stt(b64, mime) {
   const buf = Buffer.from(b64, "base64");
-  if (buf.length < 300) return ""; // Accept shorter audio clips
+  if (buf.length < 100) throw new Error("Audio too short"); // Lowered threshold
   
   const fd = new FormData();
   fd.set("model", STT_MODEL);
   fd.set("temperature", "0");
-  fd.set("file", new Blob([buf], { type: mime || "application/octet-stream" }), "audio.webm");
+  // Better file extension based on mime type
+  const ext = mime?.includes('webm') ? 'webm' : 
+             mime?.includes('mp4') ? 'mp4' : 
+             mime?.includes('wav') ? 'wav' : 'webm';
+  fd.set("file", new Blob([buf], { type: mime || "audio/webm" }), `audio.${ext}`);
   
   const r = await fetch(`${OPENAI_ROOT}/audio/transcriptions`, {
     method: "POST",
@@ -238,12 +282,19 @@ async function stt(b64, mime) {
     body: fd
   });
   
-  if (!r.ok) throw new Error(`STT ${r.status}`);
+  if (!r.ok) {
+    const errorText = await r.text();
+    console.error("STT API Error:", r.status, errorText);
+    throw new Error(`STT ${r.status}: ${errorText}`);
+  }
+  
   const j = await r.json();
   return (j.text || "");
 }
 
 async function tts(text) {
+  if (!text || !text.trim()) throw new Error("No text to synthesize");
+  
   const r = await fetch(`${OPENAI_ROOT}/audio/speech`, {
     method: "POST",
     headers: { 
@@ -259,7 +310,12 @@ async function tts(text) {
     })
   });
   
-  if (!r.ok) throw new Error(`TTS ${r.status}`);
+  if (!r.ok) {
+    const errorText = await r.text();
+    console.error("TTS API Error:", r.status, errorText);
+    throw new Error(`TTS ${r.status}: ${errorText}`);
+  }
+  
   const b64 = Buffer.from(await r.arrayBuffer()).toString("base64");
   return `data:audio/mpeg;base64,${b64}`;
 }
@@ -282,7 +338,12 @@ async function chat(system, user) {
     })
   });
   
-  if (!r.ok) throw new Error(`CHAT ${r.status}`);
+  if (!r.ok) {
+    const errorText = await r.text();
+    console.error("Chat API Error:", r.status, errorText);
+    throw new Error(`CHAT ${r.status}: ${errorText}`);
+  }
+  
   const j = await r.json();
   return j.choices?.[0]?.message?.content?.trim() || "";
 }
