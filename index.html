@@ -74,157 +74,519 @@
   const LS_ROLE='nora_role';
   const LS_INTRO='nora_intro_done_';
 
-  const speaker=new Audio(); speaker.preload='none'; speaker.playsInline=true;
+  const speaker=new Audio(); 
+  speaker.preload='none'; 
+  speaker.playsInline=true;
+  speaker.crossOrigin = "anonymous";
 
-  let audioCtx, primed=false, micPrimed=false;
+  let audioCtx, primed=false, micPermissionGranted=false;
   let isOn=false, isSpeaking=false, loopRunning=false;
   let media=null, rec=null, chunks=[];
+  let currentStream = null;
 
   function setState(s){ mic.className='mic '+s; }
-  function toast(m){ const t=document.createElement('div'); t.className='toast'; t.textContent=m; document.body.appendChild(t); setTimeout(()=>{t.remove();},2400); }
+  function toast(m){ 
+    const t=document.createElement('div'); 
+    t.className='toast'; 
+    t.textContent=m; 
+    document.body.appendChild(t); 
+    setTimeout(()=>{t.remove();},3000); 
+  }
   function showGate(){ gate.classList.add('visible'); }
   function hideGate(){ gate.classList.remove('visible'); }
-  function normCode(s){ const t=String(s||'').replace(/[^0-9]/g,'').slice(0,8); return t.length===8? t.slice(0,4)+'-'+t.slice(4):''; }
+  function normCode(s){ 
+    const t=String(s||'').replace(/[^0-9]/g,'').slice(0,8); 
+    return t.length===8? t.slice(0,4)+'-'+t.slice(4):''; 
+  }
 
-  if(localStorage.getItem(LS_CODE)) hideGate(); else showGate();
+  // Initialize
+  if(localStorage.getItem(LS_CODE)) {
+    hideGate(); 
+  } else {
+    showGate();
+  }
+
+  // Team code entry
   enterBtn.onclick = ()=>{
     const c=normCode(codeIn.value)||codeIn.value.trim();
-    if(!/^\d{4}-\d{4}$/.test(c)){ toast('Use ####-####'); return; }
+    if(!/^\d{4}-\d{4}$/.test(c)){ 
+      toast('Use format: ####-####'); 
+      return; 
+    }
     localStorage.setItem(LS_CODE,c);
     localStorage.removeItem(LS_ROLE);
     hideGate();
+    toast('Team code saved');
   };
 
-  async function ensureAudio(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state!=='running') await audioCtx.resume(); }
-  async function primeOnce(){
-    if(primed) return;
-    await ensureAudio();
-    const b=audioCtx.createBuffer(1,1,audioCtx.sampleRate);
-    const s=audioCtx.createBufferSource(); s.buffer=b; s.connect(audioCtx.destination); s.start(0);
-    try{ speaker.src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="; await speaker.play(); speaker.pause(); speaker.currentTime=0; }catch{}
-    primed=true;
-  }
-  async function askMicPermissionOnce(){
-    if(micPrimed) return;
-    const t = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
-    t.getTracks().forEach(x=>x.stop());
-    micPrimed=true;
-  }
-
-  async function playDataUrl(u){
-    isSpeaking=true; setState('speaking');
-    try{
-      speaker.pause(); speaker.currentTime=0; speaker.src=u;
-      await speaker.play();
-      await new Promise(res=>{ speaker.onended=res; speaker.onpause=res; });
-    }catch(e){ /* swallow */ }
-    isSpeaking=false; setState(isOn?'listening':'idle');
-  }
-
-  function pickMime(){ const M=window.MediaRecorder; if(!M||!M.isTypeSupported) return ""; const pref=["audio/mp4;codecs=mp4a.40.2","audio/m4a","audio/webm;codecs=opus","audio/webm","audio/mpeg","audio/wav"]; for(const m of pref) if(M.isTypeSupported(m)) return m; return ""; }
-  async function startRecorder(){
-    const mime=pickMime();
-    media=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
-    rec=new MediaRecorder(media,mime?{mimeType:mime}:{});
-    chunks=[]; rec.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
-    rec.start(150); return rec;
-  }
-  function stopRecorder(){ try{rec?.stop();}catch{} try{media?.getTracks().forEach(t=>t.stop());}catch{} rec=null; media=null; }
-
-  // LOWERED thresholds so short phrases (like “remember this”) are captured
-  function waitUtterance(r){
-    const MIN_BYTES = 400;      // was 1400 — accept short utterances
-    const LINGER_MS = 900;      // slightly quicker end detect
-    return new Promise(resolve=>{
-      let start=performance.now(), last=start, heard=false;
-      const iv=setInterval(()=>{
-        const now=performance.now();
-        if(chunks.length){ heard=true; last=now; }
-        if(heard && now-last>LINGER_MS){
-          clearInterval(iv); try{r.stop();}catch{} setTimeout(()=>{
-            const b=new Blob(chunks,{type:r.mimeType||'audio/webm'}); chunks=[];
-            resolve(b.size>MIN_BYTES?b:null);
-          },120);
-        }
-        if(now-start>14000){ clearInterval(iv); try{r.stop();}catch{} resolve(null); }
-      },110);
-    });
-  }
-  async function blobToB64(b){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onloadend=()=>res(String(fr.result).split(',')[1]); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(b); }); }
-
-  // If the main turn fails, still try to get a short server TTS ack so it’s never silent
-  async function serverAck(text){
-    try{
-      const code=localStorage.getItem(LS_CODE)||'';
-      const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code, say:text})});
-      const j=await r.json(); if(j.audio) await playDataUrl(j.audio);
-    }catch{/* ignore */}
-  }
-
-  async function loop(){
-    if(loopRunning) return; loopRunning=true;
-    while(isOn){
-      try{
-        if(isSpeaking){ await new Promise(r=>setTimeout(r,60)); continue; }
-        await ensureAudio();
-        const r=await startRecorder();
-        const heard=await waitUtterance(r);
-        stopRecorder();
-        if(!isOn) break;
-        if(!heard) continue;
-
-        const code=localStorage.getItem(LS_CODE)||'';
-        const role=localStorage.getItem(LS_ROLE)||'employee';
-        const b64=await blobToB64(heard);
-        setState('thinking');
-        const resp=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,audio:{data:b64,mime:heard.type},role})});
-        const data=await resp.json();
-
-        if(data.control?.requireCode){ isOn=false; setState('idle'); showGate(); break; }
-        if(data.control?.role){ localStorage.setItem(LS_ROLE, data.control.role); }
-
-        if(data.audio) await playDataUrl(data.audio);
-        else if(data.response){
-          const r2=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code, say:data.response})});
-          const j2=await r2.json(); if(j2.audio) await playDataUrl(j2.audio); else setState('listening');
-        } else {
-          // last ditch: ask server to speak an acknowledgement so we don’t go silent
-          await serverAck("I heard you.");
-          setState('listening');
-        }
-      }catch(e){
-        await serverAck("I heard you, but ran into an error.");
-        setState('error'); setTimeout(()=>setState(isOn?'listening':'idle'),240);
-      }
-    }
-    loopRunning=false;
-  }
-
-  mic.addEventListener('click', async ()=>{
-    if(!localStorage.getItem(LS_CODE)){ showGate(); return; }
-    if(isSpeaking){ try{speaker.pause();}catch{} return; }
-    if(!isOn){
-      isOn=true; mic.setAttribute('aria-pressed','true');
-      try{ await primeOnce(); await askMicPermissionOnce(); }
-      catch(e){ isOn=false; mic.setAttribute('aria-pressed','false'); setState('error'); toast('Microphone permission is required'); return; }
-
-      // Intro (server TTS)
-      const code=localStorage.getItem(LS_CODE);
-      const introKey=LS_INTRO+code;
-      setState('thinking');
-      if(!localStorage.getItem(introKey)){
-        const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({businessId:code,intro:true})}).catch(()=>null);
-        const j= r? await r.json().catch(()=>({})) : {};
-        if(j.audio) await playDataUrl(j.audio);
-        else if(j.response){ await serverAck(j.response); }
-        localStorage.setItem(introKey,'1');
-      }
-      setState('listening');
-      loop();
-    } else {
-      isOn=false; mic.setAttribute('aria-pressed','false'); setState('idle'); stopRecorder();
+  // Allow Enter key in team code input
+  codeIn.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      enterBtn.click();
     }
   });
+
+  // Audio context setup
+  async function ensureAudio(){ 
+    if(!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if(audioCtx.state !== 'running') {
+      await audioCtx.resume();
+    }
+  }
+
+  // Prime audio system
+  async function primeAudioOnce(){
+    if(primed) return;
+    try {
+      await ensureAudio();
+      // Create silent audio buffer to wake up audio system
+      const buffer = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
+      const source = audioCtx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(audioCtx.destination);
+      source.start(0);
+      
+      // Prime speaker with silent audio
+      speaker.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+      const playPromise = speaker.play();
+      if (playPromise !== undefined) {
+        await playPromise.catch(() => {});
+      }
+      speaker.pause();
+      speaker.currentTime = 0;
+      
+      primed = true;
+    } catch(e) {
+      console.warn('Audio priming failed:', e);
+    }
+  }
+
+  // Request microphone permission
+  async function requestMicPermission(){
+    if(micPermissionGranted) return true;
+    
+    try {
+      // Clean up any existing stream first
+      if(currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+        currentStream = null;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 16000
+        }
+      });
+      
+      // Test that we can actually use the stream
+      currentStream = stream;
+      micPermissionGranted = true;
+      
+      // Don't stop the stream immediately - keep it for use
+      return true;
+    } catch(e) {
+      console.error('Microphone permission denied:', e);
+      toast('Microphone permission required');
+      return false;
+    }
+  }
+
+  // Play audio from data URL
+  async function playDataUrl(url){
+    if (!url) return;
+    
+    isSpeaking = true; 
+    setState('speaking');
+    
+    try {
+      speaker.pause();
+      speaker.currentTime = 0;
+      speaker.src = url;
+      
+      const playPromise = speaker.play();
+      if (playPromise !== undefined) {
+        await playPromise;
+        // Wait for audio to finish
+        await new Promise(resolve => {
+          const checkEnded = () => {
+            if (speaker.ended || speaker.paused) {
+              resolve();
+            } else {
+              setTimeout(checkEnded, 100);
+            }
+          };
+          speaker.onended = resolve;
+          speaker.onerror = resolve;
+          checkEnded();
+        });
+      }
+    } catch(e) {
+      console.error('Audio playback error:', e);
+    } finally {
+      isSpeaking = false;
+      setState(isOn ? 'listening' : 'idle');
+    }
+  }
+
+  // Get best MIME type for recording
+  function getRecordingMimeType(){ 
+    const MediaRecorder = window.MediaRecorder;
+    if(!MediaRecorder || !MediaRecorder.isTypeSupported) return "";
+    
+    const preferred = [
+      "audio/webm;codecs=opus",
+      "audio/webm", 
+      "audio/mp4;codecs=mp4a.40.2",
+      "audio/m4a",
+      "audio/mpeg",
+      "audio/wav"
+    ];
+    
+    for(const mime of preferred) {
+      if(MediaRecorder.isTypeSupported(mime)) return mime;
+    }
+    return "";
+  }
+
+  // Start recording
+  async function startRecording(){
+    try {
+      // Use existing stream if available, otherwise request new one
+      if (!currentStream || !currentStream.active) {
+        const hasPermission = await requestMicPermission();
+        if (!hasPermission) {
+          throw new Error('Microphone permission denied');
+        }
+      }
+
+      const mimeType = getRecordingMimeType();
+      const options = mimeType ? { mimeType } : {};
+      
+      rec = new MediaRecorder(currentStream, options);
+      chunks = [];
+      
+      rec.ondataavailable = e => {
+        if (e.data && e.data.size > 0) {
+          chunks.push(e.data);
+        }
+      };
+      
+      rec.start(200); // Collect data every 200ms
+      return rec;
+    } catch(e) {
+      console.error('Failed to start recording:', e);
+      throw e;
+    }
+  }
+
+  // Stop recording
+  function stopRecording(){ 
+    try {
+      if (rec && rec.state !== 'inactive') {
+        rec.stop();
+      }
+    } catch(e) {
+      console.error('Error stopping recorder:', e);
+    }
+    rec = null;
+  }
+
+  // Wait for user to finish speaking
+  function waitForUtterance(recorder){
+    const MIN_BYTES = 800;      // Minimum audio data size
+    const SILENCE_TIMEOUT = 1200;  // Time to wait after last audio data
+    const MAX_RECORDING_TIME = 15000; // Maximum recording time
+    
+    return new Promise(resolve => {
+      let startTime = performance.now();
+      let lastDataTime = startTime;
+      let hasAudioData = false;
+      
+      const checkInterval = setInterval(() => {
+        const now = performance.now();
+        
+        // Check if we have new audio data
+        if (chunks.length > 0) {
+          hasAudioData = true;
+          lastDataTime = now;
+        }
+        
+        // Stop if we have audio data and haven't received new data for a while
+        if (hasAudioData && (now - lastDataTime) > SILENCE_TIMEOUT) {
+          clearInterval(checkInterval);
+          try {
+            recorder.stop();
+          } catch(e) {}
+          
+          setTimeout(() => {
+            const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+            chunks = [];
+            resolve(blob.size > MIN_BYTES ? blob : null);
+          }, 200);
+          return;
+        }
+        
+        // Stop if maximum recording time reached
+        if (now - startTime > MAX_RECORDING_TIME) {
+          clearInterval(checkInterval);
+          try {
+            recorder.stop();
+          } catch(e) {}
+          
+          setTimeout(() => {
+            const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+            chunks = [];
+            resolve(blob.size > MIN_BYTES ? blob : null);
+          }, 200);
+        }
+      }, 150);
+    });
+  }
+
+  // Convert blob to base64
+  async function blobToBase64(blob){ 
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  // Server acknowledgment fallback
+  async function serverAck(text){
+    try {
+      const code = localStorage.getItem(LS_CODE) || '';
+      const response = await fetch(API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ businessId: code, say: text })
+      });
+      
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+      
+      const data = await response.json();
+      if (data.audio) {
+        await playDataUrl(data.audio);
+      }
+    } catch(e) {
+      console.error('Server ack failed:', e);
+    }
+  }
+
+  // Main conversation loop
+  async function conversationLoop(){
+    if(loopRunning) return;
+    loopRunning = true;
+    
+    while(isOn){
+      try {
+        // Skip if currently speaking
+        if(isSpeaking){ 
+          await new Promise(resolve => setTimeout(resolve, 100)); 
+          continue; 
+        }
+
+        await ensureAudio();
+        const recorder = await startRecording();
+        const audioBlob = await waitForUtterance(recorder);
+        stopRecording();
+        
+        if(!isOn) break; // Check if turned off during recording
+        
+        if(!audioBlob) continue; // No audio detected, continue listening
+
+        const code = localStorage.getItem(LS_CODE) || '';
+        const role = localStorage.getItem(LS_ROLE) || 'employee';
+        const audioBase64 = await blobToBase64(audioBlob);
+        
+        setState('thinking');
+        
+        const response = await fetch(API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            businessId: code,
+            audio: { 
+              data: audioBase64, 
+              mime: audioBlob.type 
+            },
+            role: role
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server error: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // Handle server responses
+        if (data.control?.requireCode) { 
+          isOn = false; 
+          setState('idle'); 
+          showGate(); 
+          toast('Team code required');
+          break; 
+        }
+        
+        if (data.control?.role) { 
+          localStorage.setItem(LS_ROLE, data.control.role); 
+        }
+
+        // Play response audio
+        if (data.audio) {
+          await playDataUrl(data.audio);
+        } else if (data.response) {
+          // Fallback: convert text response to audio
+          const ttsResponse = await fetch(API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ businessId: code, say: data.response })
+          });
+          
+          if (ttsResponse.ok) {
+            const ttsData = await ttsResponse.json();
+            if (ttsData.audio) {
+              await playDataUrl(ttsData.audio);
+            }
+          }
+        } else {
+          // Last resort acknowledgment
+          await serverAck("I heard you.");
+        }
+        
+        setState('listening');
+
+      } catch(e) {
+        console.error('Conversation loop error:', e);
+        await serverAck("Sorry, I had trouble with that.");
+        setState('error');
+        setTimeout(() => setState(isOn ? 'listening' : 'idle'), 500);
+      }
+    }
+    loopRunning = false;
+  }
+
+  // Main mic button handler
+  mic.addEventListener('click', async () => {
+    // Check for team code
+    if(!localStorage.getItem(LS_CODE)){ 
+      showGate(); 
+      return; 
+    }
+    
+    // Stop speaking if currently playing audio
+    if(isSpeaking){ 
+      try {
+        speaker.pause();
+        speaker.currentTime = 0;
+      } catch(e) {}
+      return; 
+    }
+    
+    if(!isOn){
+      // Turn ON
+      isOn = true; 
+      mic.setAttribute('aria-pressed', 'true');
+      setState('thinking');
+      
+      try { 
+        await primeAudioOnce(); 
+        const hasPermission = await requestMicPermission();
+        
+        if (!hasPermission) {
+          throw new Error('Microphone permission required');
+        }
+
+        // Handle intro for first-time users
+        const code = localStorage.getItem(LS_CODE);
+        const introKey = LS_INTRO + code;
+        
+        if (!localStorage.getItem(introKey)) {
+          // First time user - get intro
+          const response = await fetch(API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ businessId: code, intro: true })
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data.audio) {
+              await playDataUrl(data.audio);
+            } else if (data.response) {
+              await serverAck(data.response);
+            }
+          }
+          
+          localStorage.setItem(introKey, '1');
+        } else {
+          // Returning user - check for updates
+          const response = await fetch(API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              businessId: code, 
+              checkUpdates: true,
+              role: localStorage.getItem(LS_ROLE) || 'employee'
+            })
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data.audio) {
+              await playDataUrl(data.audio);
+            } else if (data.response) {
+              await serverAck(data.response);
+            }
+          }
+        }
+        
+        setState('listening');
+        conversationLoop();
+        
+      } catch(e) { 
+        console.error('Failed to start Nora:', e);
+        isOn = false; 
+        mic.setAttribute('aria-pressed', 'false'); 
+        setState('error'); 
+        toast('Failed to start - check microphone permissions');
+        setTimeout(() => setState('idle'), 1000);
+      }
+      
+    } else {
+      // Turn OFF
+      isOn = false; 
+      mic.setAttribute('aria-pressed', 'false'); 
+      setState('idle'); 
+      stopRecording();
+      
+      // Clean up stream
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+        currentStream = null;
+        micPermissionGranted = false;
+      }
+    }
+  });
+
+  // Format team code input
+  codeIn.addEventListener('input', (e) => {
+    const formatted = normCode(e.target.value);
+    if (formatted && formatted !== e.target.value) {
+      e.target.value = formatted;
+    }
+  });
+
 })();
 </script>
 </body>
